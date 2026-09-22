@@ -33,6 +33,7 @@ grep -q "harmonySubmitChunk" app.js
 grep -q "skipPreview" app.js
 grep -q "monthChunks" app.js
 grep -q "harmonyVariable" app.js
+grep -q "concatenate" app.js
 grep -q "Math.min(12,chunks.length)" app.js
 grep -q "fetchAlternatives" app.js
 grep -q "Open-Meteo Air Quality" app.js
