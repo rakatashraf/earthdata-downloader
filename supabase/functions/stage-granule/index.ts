@@ -96,13 +96,13 @@ Deno.serve(async(req)=>{
   if(!upstream.body)return json(502,{error:"NASA returned no file body"},headers);
 
   const contentType=upstream.headers.get("content-type")||"application/octet-stream",reader=upstream.body.getReader(),paths:string[]=[];
-  let pending=new Uint8Array(0),part=0,total=0;
-  const uploadPart=async(bytes:Uint8Array)=>{
-    const path=extractionId+"/"+filename+"/part-"+String(part++).padStart(5,"0")+".bin";
-    const {error}=await supabase.storage.from(BUCKET).upload(path,bytes,{contentType:"application/octet-stream",upsert:true,cacheControl:"0"});
-    if(error)throw error;
-    paths.push(path); total+=bytes.byteLength;
+  let pending=new Uint8Array(0),part=0,total=0,uploads:Promise<void>[]=[];
+  const queuePart=(bytes:Uint8Array)=>{
+    const index=part++,path=extractionId+"/"+filename+"/part-"+String(index).padStart(5,"0")+".bin";
+    paths.push(path);total+=bytes.byteLength;
+    uploads.push((async()=>{const {error}=await supabase.storage.from(BUCKET).upload(path,bytes,{contentType:"application/octet-stream",upsert:true,cacheControl:"0"});if(error)throw error})());
   };
+  const flushUploads=async()=>{if(uploads.length){const batch=uploads;uploads=[];await Promise.all(batch)}};
 
   try{
     while(true){
@@ -111,11 +111,13 @@ Deno.serve(async(req)=>{
       const next=new Uint8Array(pending.byteLength+value.byteLength);
       next.set(pending);next.set(value,pending.byteLength);pending=next;
       while(pending.byteLength>=PART_BYTES){
-        await uploadPart(pending.slice(0,PART_BYTES));
+        queuePart(pending.slice(0,PART_BYTES));
         pending=pending.slice(PART_BYTES);
+        if(uploads.length>=4)await flushUploads();
       }
     }
-    if(pending.byteLength)await uploadPart(pending);
+    if(pending.byteLength)queuePart(pending);
+    await flushUploads();
     const metaPath=extractionId+"/"+filename+"/manifest.json";
     const meta={original_url:target,filename,content_type:contentType,total_bytes:total,parts:paths,created_at:new Date().toISOString()};
     const {error:me}=await supabase.storage.from(BUCKET).upload(metaPath,new Blob([JSON.stringify(meta)],{type:"application/json"}),{contentType:"application/json",upsert:true,cacheControl:"0"});
