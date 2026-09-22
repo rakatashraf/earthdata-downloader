@@ -11,9 +11,24 @@ const allowedHosts = [
   "alaska.edu",
 ];
 
-function hostAllowed(hostname: string) {
-  const h = hostname.toLowerCase();
-  return allowedHosts.some((suffix) => h === suffix || h.endsWith("." + suffix));
+function urlAllowed(url: URL) {
+  const h = url.hostname.toLowerCase();
+  if (allowedHosts.some((suffix) => h === suffix || h.endsWith("." + suffix))) return true;
+
+  const virtualHostedGesdisc =
+    h === "gesdisc-cumulus-prod-protected.s3.us-west-2.amazonaws.com" ||
+    h === "gesdisc-cumulus-prod-protected.s3.amazonaws.com" ||
+    h === "gesdisc-cumulus-prod-protected.s3-us-west-2.amazonaws.com";
+
+  if (virtualHostedGesdisc) return true;
+
+  const pathStyleGesdisc =
+    (h === "s3.us-west-2.amazonaws.com" ||
+     h === "s3.amazonaws.com" ||
+     h === "s3-us-west-2.amazonaws.com") &&
+    url.pathname.startsWith("/gesdisc-cumulus-prod-protected/");
+
+  return pathStyleGesdisc;
 }
 
 function cors(origin: string | null) {
@@ -72,8 +87,11 @@ Deno.serve(async (req) => {
     return json(400, { error: "Invalid target URL" }, headers);
   }
 
-  if (current.protocol !== "https:" || !hostAllowed(current.hostname)) {
-    return json(403, { error: "Target host is not an approved Earthdata/DAAC host" }, headers);
+  if (current.protocol !== "https:" || !urlAllowed(current)) {
+    return json(403, {
+      error: "Target host is not an approved Earthdata/DAAC host",
+      host: current.hostname,
+    }, headers);
   }
 
   const cookies = new Map<string, string>();
@@ -81,8 +99,12 @@ Deno.serve(async (req) => {
 
   try {
     for (let hop = 0; hop < 10; hop++) {
-      if (current.protocol !== "https:" || !hostAllowed(current.hostname)) {
-        return json(403, { error: "Redirected to an unapproved host", host: current.hostname }, headers);
+      if (current.protocol !== "https:" || !urlAllowed(current)) {
+        return json(403, {
+          error: "Redirected to an unapproved host: " + current.hostname,
+          host: current.hostname,
+          url: current.toString(),
+        }, headers);
       }
 
       const cookieHeader = [...cookies.values()].filter(Boolean).join("; ");
