@@ -112,6 +112,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .status{color:var(--muted)}
 .status.error{color:var(--danger)}
 .status.ok{color:var(--accent-2)}
+.status.warn{color:var(--warning)}
 .hint{
   margin:-3px 0 18px;
   padding:10px 12px;
@@ -167,7 +168,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 }
 .metrics{
   display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
   gap:10px;
   margin-bottom:18px;
 }
