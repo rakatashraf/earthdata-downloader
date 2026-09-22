@@ -26,7 +26,6 @@ grep -q "conversion_status" app.js
 grep -q "new Worker" app.js
 grep -q "class GranuleWorkerPool" app.js
 grep -q "function conversionConcurrency" app.js
-grep -q "maxAttempts=7" app.js
 grep -q "runReliablePool" app.js
 grep -q "STAGING_BATCH_MAX=24" app.js
 grep -q "STAGING_TARGET_BYTES=700" app.js
@@ -35,9 +34,11 @@ grep -q "STAGING_CONCURRENCY=12" app.js
 grep -q "stageOne" app.js
 grep -q "stagedBuffer" app.js
 grep -q "cleanupStage" app.js
+grep -q "convertOneReliable(g,start+i,total,progress,pool,6)" app.js
+grep -q "attempt<=5" app.js
+grep -q "Promise.allSettled(ready.map" app.js
 grep -q "original source granule(s) queued for Supabase staging" app.js
 test -f supabase/functions/stage-granule/index.ts
-grep -q "Recovery pass:" app.js
 grep -q "fetchAlternatives" app.js
 grep -q "Open-Meteo Air Quality" app.js
 grep -q "NASA POWER" app.js
