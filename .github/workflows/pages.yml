@@ -19,15 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check JavaScript syntax
-        run: node --check app.js
-      - name: Reject credential-shaped literals
+      - name: Run product validation
         shell: bash
-        run: |
-          if grep -REn --exclude-dir=.git '(Bearer[[:space:]]+eyJ[A-Za-z0-9_-]{20,}|[0-9a-fA-F]{64})' .; then
-            echo 'Credential-shaped literal detected. Refusing deployment.'
-            exit 1
-          fi
+        run: bash scripts/validate.sh
 
   deploy:
     needs: validate
