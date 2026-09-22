@@ -158,3 +158,23 @@ For Harmony-capable bounding-box collections the extractor prefers NASA-side pro
 6. The browser parallel worker pool converts only the reduced outputs.
 
 A hard one-second end-to-end guarantee per remote granule is not possible because provider processing, transfer latency and source-file size are external constraints. The implementation instead minimizes bytes transferred and maximizes safe parallel throughput.
+
+
+## Direct OPeNDAP fast path
+
+For gridded collections whose Harmony service advertises the `sds/hoss-opendap-url` capability, the extractor does not wait for monthly transformed products to be generated and staged. It first gets the exact CMR granules for the requested time window, then requests a variable-and-bounding-box constrained OPeNDAP URL for each granule. Up to 32 lightweight URL-generation requests run concurrently. The resulting subset URLs are downloaded and parsed with the normal worker pool.
+
+If the collection does not support this service, or if it yields no usable URLs, the application falls back to Harmony server-side transformation.
+
+Harmony transformation requests use the documented `f` output-format query parameter, not `format`.
+
+## Separate source exports
+
+NASA satellite rows are never merged with alternative-provider rows.
+
+- **Download NASA satellite CSV** exports only NASA/Harmony/OPeNDAP satellite rows.
+- Each alternative provider card has its own **Download this source CSV** button.
+- OpenAQ has its own **Download OpenAQ CSV** button.
+- Open-Meteo Air Quality, Open-Meteo Historical Weather, NASA POWER and WorldPop therefore produce distinct files with their own source metadata and units.
+
+This separation avoids treating satellite retrievals, modeled/reanalysis values, population products and ground-station measurements as one homogeneous dataset.
