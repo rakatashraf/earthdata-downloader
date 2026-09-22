@@ -51,6 +51,9 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url);
+  if (url.searchParams.get("health") === "1") {
+    return json(200, { ok: true, service: "openaq-proxy" }, headers);
+  }
   const marker = "/openaq-proxy/api/openaq";
   const index = url.pathname.indexOf(marker);
   if (index < 0) {
