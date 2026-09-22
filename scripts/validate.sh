@@ -15,6 +15,7 @@ grep -q 'id="neCoord"' index.html
 # Architecture contract: authenticated data downloads must use proxies.
 grep -q "const NASA_PROXY_BASE=" app.js
 grep -q "const OPENAQ_PROXY_BASE=" app.js
+grep -q "const ALT_PROXY_BASE=" app.js
 ! grep -q "fetch(g.url" app.js
 
 # No silent browser conversion cap and requested-area clipping must exist.
@@ -31,6 +32,13 @@ grep -q "harmonySubsetCollection" app.js
 grep -q "harmonySubmitChunk" app.js
 grep -q "skipPreview" app.js
 grep -q "monthChunks" app.js
+grep -q "harmonyVariable" app.js
+grep -q "Math.min(12,chunks.length)" app.js
+grep -q "fetchAlternatives" app.js
+grep -q "Open-Meteo Air Quality" app.js
+grep -q "NASA POWER" app.js
+grep -q "WorldPop" app.js
+test -f supabase/functions/alternative-proxy/index.ts
 ! grep -q "q.map((g,i)=>convertOneGranule" app.js
 grep -q "granule-worker.js" app.js
 
