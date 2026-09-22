@@ -1,0 +1,129 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const BUCKET = "earthdata-staging";
+const PART_BYTES = 5 * 1024 * 1024;
+const allowedOrigins = new Set(["https://rakatashraf.github.io"]);
+
+function cors(origin:string|null){
+  const local=!!origin&&/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  const allow=origin&&(allowedOrigins.has(origin)||local)?origin:"";
+  return {
+    ...(allow?{"Access-Control-Allow-Origin":allow}:{}),
+    "Access-Control-Allow-Methods":"GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers":"Content-Type,X-Earthdata-Token",
+    "Access-Control-Max-Age":"86400",
+    "Cache-Control":"no-store",
+    "Vary":"Origin",
+  };
+}
+function json(status:number,body:unknown,headers:Record<string,string>){
+  return new Response(JSON.stringify(body),{status,headers:{...headers,"Content-Type":"application/json; charset=utf-8"}});
+}
+function safe(s:string){return s.replace(/[^A-Za-z0-9._-]+/g,"_").slice(0,180)||"granule";}
+function secretKey(){
+  const modern=Deno.env.get("SUPABASE_SECRET_KEYS");
+  if(modern){try{return JSON.parse(modern).default||Object.values(JSON.parse(modern))[0] as string}catch{}}
+  return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+}
+async function ensureBucket(supabase:any){
+  const {data}=await supabase.storage.getBucket(BUCKET);
+  if(data)return;
+  const {error}=await supabase.storage.createBucket(BUCKET,{public:false,fileSizeLimit:50*1024*1024});
+  if(error&&!/already exists/i.test(error.message||""))throw error;
+}
+async function signParts(supabase:any,paths:string[]){
+  const out=[];
+  for(const path of paths){
+    const {data,error}=await supabase.storage.from(BUCKET).createSignedUrl(path,3600);
+    if(error)throw error;
+    out.push({path,url:data.signedUrl});
+  }
+  return out;
+}
+async function removePaths(supabase:any,paths:string[]){
+  for(let i=0;i<paths.length;i+=100){
+    const batch=paths.slice(i,i+100);
+    const {error}=await supabase.storage.from(BUCKET).remove(batch);
+    if(error)throw error;
+  }
+}
+
+Deno.serve(async(req)=>{
+  const origin=req.headers.get("origin"),headers=cors(origin);
+  if(req.method==="OPTIONS")return new Response(null,{status:204,headers});
+  const local=!!origin&&/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  if(origin&&!allowedOrigins.has(origin)&&!local)return json(403,{error:"Origin not allowed"},headers);
+
+  const key=secretKey();
+  if(!key)return json(500,{error:"Supabase server secret is unavailable"},headers);
+  const supabase=createClient(Deno.env.get("SUPABASE_URL")!,key,{auth:{persistSession:false}});
+  try{await ensureBucket(supabase)}catch(e){return json(500,{error:"Could not initialize staging bucket",detail:e instanceof Error?e.message:String(e)},headers)}
+
+  if(req.method==="GET"){
+    const url=new URL(req.url);
+    if(url.searchParams.get("health")==="1")return json(200,{ok:true,service:"earthdata-staging",bucket:BUCKET,part_bytes:PART_BYTES},headers);
+    return json(405,{error:"GET is only available for health checks"},headers);
+  }
+  if(req.method!=="POST")return json(405,{error:"Method not allowed"},headers);
+
+  let body:any;
+  try{body=await req.json()}catch{return json(400,{error:"Invalid JSON body"},headers)}
+  const action=String(body.action||"stage");
+
+  if(action==="cleanup"){
+    const paths=Array.isArray(body.paths)?body.paths.filter((x:any)=>typeof x==="string"&&x.startsWith(String(body.extraction_id||"")+"/")):[];
+    if(paths.length){try{await removePaths(supabase,paths)}catch(e){return json(500,{error:"Cleanup failed",detail:e instanceof Error?e.message:String(e)},headers)}}
+    return json(200,{ok:true,removed:paths.length},headers);
+  }
+
+  if(action==="resign"){
+    const paths=Array.isArray(body.paths)?body.paths.filter((x:any)=>typeof x==="string"):[];
+    try{return json(200,{ok:true,parts:await signParts(supabase,paths)},headers)}catch(e){return json(500,{error:"Could not sign staged parts",detail:e instanceof Error?e.message:String(e)},headers)}
+  }
+
+  if(action!=="stage")return json(400,{error:"Unknown action"},headers);
+
+  const target=String(body.url||""),token=String(req.headers.get("x-earthdata-token")||"").trim(),extractionId=safe(String(body.extraction_id||"session")),filename=safe(String(body.filename||"granule.bin"));
+  if(!target||!token)return json(400,{error:"NASA source URL and Earthdata token are required"},headers);
+
+  const nasaProxy=(Deno.env.get("SUPABASE_URL")||"").replace(/\/$/,"")+"/functions/v1/nasa-proxy?url="+encodeURIComponent(target);
+  let upstream:Response;
+  try{upstream=await fetch(nasaProxy,{headers:{"X-Earthdata-Token":token}})}catch(e){return json(502,{error:"NASA staging download failed",detail:e instanceof Error?e.message:String(e)},headers)}
+  if(!upstream.ok){
+    const text=await upstream.text().catch(()=>"");
+    return json(upstream.status,{error:"NASA staging download failed",detail:text.slice(0,1000)},headers);
+  }
+  if(!upstream.body)return json(502,{error:"NASA returned no file body"},headers);
+
+  const contentType=upstream.headers.get("content-type")||"application/octet-stream",reader=upstream.body.getReader(),paths:string[]=[];
+  let pending=new Uint8Array(0),part=0,total=0;
+  const uploadPart=async(bytes:Uint8Array)=>{
+    const path=extractionId+"/"+filename+"/part-"+String(part++).padStart(5,"0")+".bin";
+    const {error}=await supabase.storage.from(BUCKET).upload(path,bytes,{contentType:"application/octet-stream",upsert:true,cacheControl:"0"});
+    if(error)throw error;
+    paths.push(path); total+=bytes.byteLength;
+  };
+
+  try{
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      const next=new Uint8Array(pending.byteLength+value.byteLength);
+      next.set(pending);next.set(value,pending.byteLength);pending=next;
+      while(pending.byteLength>=PART_BYTES){
+        await uploadPart(pending.slice(0,PART_BYTES));
+        pending=pending.slice(PART_BYTES);
+      }
+    }
+    if(pending.byteLength)await uploadPart(pending);
+    const metaPath=extractionId+"/"+filename+"/manifest.json";
+    const meta={original_url:target,filename,content_type:contentType,total_bytes:total,parts:paths,created_at:new Date().toISOString()};
+    const {error:me}=await supabase.storage.from(BUCKET).upload(metaPath,new Blob([JSON.stringify(meta)],{type:"application/json"}),{contentType:"application/json",upsert:true,cacheControl:"0"});
+    if(me)throw me;
+    const signed=await signParts(supabase,paths);
+    return json(200,{ok:true,filename,content_type:contentType,total_bytes:total,paths,parts:signed,manifest_path:metaPath},headers);
+  }catch(e){
+    try{if(paths.length)await removePaths(supabase,paths)}catch{}
+    return json(500,{error:"Staging failed",detail:e instanceof Error?e.message:String(e),staged_parts:paths.length},headers);
+  }
+});
