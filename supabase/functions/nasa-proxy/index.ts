@@ -125,6 +125,9 @@ Deno.serve(async (req) => {
   }
 
   const requestUrl = new URL(req.url);
+  if (requestUrl.searchParams.get("health") === "1") {
+    return json(200, { ok: true, service: "nasa-proxy", version: 4 }, headers);
+  }
   const targetRaw = requestUrl.searchParams.get("url");
   const token = (req.headers.get("x-earthdata-token") || "").trim();
 
