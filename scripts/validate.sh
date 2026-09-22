@@ -21,8 +21,12 @@ grep -q "const OPENAQ_PROXY_BASE=" app.js
 ! grep -q "slice(0,50)" app.js
 grep -q "function clipRows" app.js
 grep -q "conversion_status" app.js
-grep -q "Promise.allSettled" app.js
 grep -q "new Worker" app.js
+grep -q "class GranuleWorkerPool" app.js
+grep -q "function conversionConcurrency" app.js
+grep -q "maxAttempts=7" app.js
+grep -q "runReliablePool" app.js
+! grep -q "q.map((g,i)=>convertOneGranule" app.js
 grep -q "granule-worker.js" app.js
 
 # Scientific hygiene.
