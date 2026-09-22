@@ -86,14 +86,33 @@
           </select>
         </label>
 
+        <label id="genericGeometryInput" class="hidden">
+          <span id="geometryLabel">Geometry coordinates</span>
+          <input id="geometryValue" type="text" />
+        </label>
+      </div>
+
+      <div id="bboxInputs" class="bbox-grid">
         <label>
-          <span id="geometryLabel">Bounding box: minLon,minLat,maxLon,maxLat</span>
-          <input id="geometryValue" type="text" placeholder="90.30,23.68,90.55,23.90" />
+          <span>SW latitude</span>
+          <input id="swLat" type="number" step="any" min="-90" max="90" placeholder="23.68" />
+        </label>
+        <label>
+          <span>SW longitude</span>
+          <input id="swLon" type="number" step="any" min="-180" max="180" placeholder="90.30" />
+        </label>
+        <label>
+          <span>NE latitude</span>
+          <input id="neLat" type="number" step="any" min="-90" max="90" placeholder="23.90" />
+        </label>
+        <label>
+          <span>NE longitude</span>
+          <input id="neLon" type="number" step="any" min="-180" max="180" placeholder="90.55" />
         </label>
       </div>
 
       <div class="hint" id="geometryHint">
-        Longitude comes before latitude for NASA CMR spatial parameters.
+        Enter the southwest (SW) and northeast (NE) corners of the area. The app converts them internally to NASA CMR bounding-box order.
       </div>
 
       <div class="row">
