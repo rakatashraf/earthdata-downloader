@@ -161,10 +161,27 @@
       <div id="conversionLog" class="log"></div>
     </section>
 
-    <section id="groundCard" class="card hidden">
+    <section id="alternativeCard" class="card hidden">
       <div class="section-head">
         <div>
           <span class="step">5</span>
+          <h2>Alternative internet sources</h2>
+        </div>
+        <p>Compatible public APIs are fetched in parallel and kept source-labelled instead of being silently mixed with NASA values.</p>
+      </div>
+
+      <div class="row">
+        <button id="refetchAltBtn" class="primary">Refresh alternative sources</button>
+        <span id="altStatus" class="status"></span>
+      </div>
+
+      <div id="alternativeSummary" class="provider-grid"></div>
+    </section>
+
+    <section id="groundCard" class="card hidden">
+      <div class="section-head">
+        <div>
+          <span class="step">6</span>
           <h2>Ground observations</h2>
         </div>
         <p>OpenAQ stations are discovered inside the selected area and queried for raw sensor values.</p>
@@ -180,7 +197,7 @@
   </main>
 
   <footer>
-    <span>NASA CMR + Earthdata Login + OpenAQ</span>
+    <span>NASA CMR + Harmony + OpenAQ + Open-Meteo + NASA POWER + WorldPop</span>
     <span>Source-grid values are preserved. No silent interpolation.</span>
     <span id="buildStamp">Build 2026.09.22.6</span>
   </footer>
