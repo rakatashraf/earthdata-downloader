@@ -2,6 +2,7 @@
 set -euo pipefail
 
 node --check app.js
+node --check granule-worker.js
 
 # UI contract: bounding box must be exactly SW and NE coordinate fields.
 grep -q 'id="swCoord"' index.html
@@ -20,6 +21,9 @@ grep -q "const OPENAQ_PROXY_BASE=" app.js
 ! grep -q "slice(0,50)" app.js
 grep -q "function clipRows" app.js
 grep -q "conversion_status" app.js
+grep -q "Promise.allSettled" app.js
+grep -q "new Worker" app.js
+grep -q "granule-worker.js" app.js
 
 # Scientific hygiene.
 grep -q "scale_factor" app.js
