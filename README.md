@@ -33,6 +33,7 @@ Credentials are entered at runtime. Earthdata and OpenAQ credentials are not com
 - Worker count adapts to browser CPU and memory hints, with a hard safety ceiling.
 - Scientific parsing runs in reusable Web Workers so NetCDF/HDF5/GeoTIFF conversions execute in parallel without creating thousands of workers.
 - Transient download/worker failures are retried automatically with exponential backoff and jitter, up to seven attempts.
+- Anything still transiently unresolved gets a second reduced-concurrency recovery pass with five additional attempts.
 - Authorization-blocked and genuinely non-convertible granules are reported separately from transient failures.
 - One granule failure does not cancel the rest of the batch.
 - Transient NASA download failures are retried.
