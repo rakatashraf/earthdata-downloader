@@ -53,6 +53,7 @@ h2{font-size:1.22rem;margin:0}
 }
 .badge.ok{border-color:#3b8159;color:var(--accent-2);background:rgba(126,226,168,.08)}
 .badge.muted{color:var(--muted)}
+.badge.warn{border-color:#715a2a;color:var(--warning);background:rgba(255,215,137,.06)}
 .shell{max-width:1180px;margin:auto;padding:8px 24px 60px}
 .card{
   margin:18px 0;
