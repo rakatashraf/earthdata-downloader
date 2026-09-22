@@ -225,3 +225,6 @@ footer{
   .card{padding:17px;border-radius:17px}
   .ground-row{grid-template-columns:1fr}
 }
+.bbox-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}
+@media(max-width:900px){.bbox-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.bbox-grid{grid-template-columns:1fr}}
