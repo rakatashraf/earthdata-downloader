@@ -141,11 +141,11 @@ Deno.serve(async (req) => {
     return json(400, { error: "Invalid target URL" }, headers);
   }
 
-  // The caller may only start at a known NASA/DAAC provider host.
-  // CloudFront/S3 are accepted only after a trusted provider redirect.
-  if (current.protocol !== "https:" || !isProviderHost(current)) {
+  // Initial targets may be NASA/DAAC application hosts or already-signed
+  // short-lived NASA storage/CDN result URLs returned by Harmony.
+  if (current.protocol !== "https:" || !(isProviderHost(current) || isStorageRedirect(current))) {
     return json(403, {
-      error: "Initial target is not an approved Earthdata/DAAC host",
+      error: "Initial target is not an approved Earthdata/DAAC or signed storage host",
       host: current.hostname,
     }, headers);
   }
