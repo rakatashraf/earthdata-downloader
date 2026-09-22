@@ -178,3 +178,26 @@ NASA satellite rows are never merged with alternative-provider rows.
 - Open-Meteo Air Quality, Open-Meteo Historical Weather, NASA POWER and WorldPop therefore produce distinct files with their own source metadata and units.
 
 This separation avoids treating satellite retrievals, modeled/reanalysis values, population products and ground-station measurements as one homogeneous dataset.
+
+
+## Raw-source Supabase staging pipeline
+
+The active NASA extraction strategy now stages original source granule bytes before conversion.
+
+Pipeline:
+
+1. CMR returns the original granule URLs for the selected collection/date/geometry.
+2. Up to 12 source downloads are staged concurrently through the `stage-granule` Edge Function.
+3. Each raw granule is copied byte-for-byte into the private `earthdata-staging` Supabase Storage bucket.
+4. A source file is split into 5 MB temporary binary parts so files larger than the Free-plan 50 MB single-object limit can still be preserved and reconstructed.
+5. Because the organization is currently on Supabase Free with a 1 GB Storage quota, the browser processes 24-granule temporary batches rather than attempting to persist the entire multi-thousand-granule collection at once.
+6. Once every source file in the batch is staged, conversion tasks are launched from Supabase Storage. Conversion retries therefore reread the staged copy and do not download the NASA source again.
+7. After conversion/recovery completes, staged binary parts and their manifest are deleted before the next batch is staged.
+
+The original source URL, staging attempts, staged byte count, staging duration, conversion attempts and final status are written into the granule manifest.
+
+This design removes repeated source downloads while keeping staging temporary and within the current Storage quota.
+
+### Complexity note
+
+The orchestration has a fixed number of pipeline phases per batch, but remote extraction cannot be mathematically O(1): every source byte must still be transferred at least once. For N granules / B total bytes, network work is lower-bounded by O(B). The implementation minimizes repeated work rather than claiming impossible constant-time remote I/O.
