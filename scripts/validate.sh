@@ -28,7 +28,9 @@ grep -q "class GranuleWorkerPool" app.js
 grep -q "function conversionConcurrency" app.js
 grep -q "maxAttempts=7" app.js
 grep -q "runReliablePool" app.js
-grep -q "STAGING_BATCH_SIZE=24" app.js
+grep -q "STAGING_BATCH_MAX=24" app.js
+grep -q "STAGING_TARGET_BYTES=700" app.js
+grep -q "stagingBatches" app.js
 grep -q "STAGING_CONCURRENCY=12" app.js
 grep -q "stageOne" app.js
 grep -q "stagedBuffer" app.js
