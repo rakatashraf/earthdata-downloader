@@ -33,12 +33,20 @@ grep -q "harmonySubmitChunk" app.js
 grep -q "skipPreview" app.js
 grep -q "monthChunks" app.js
 grep -q "harmonyVariable" app.js
+grep -q "harmonyOpendapForGranule" app.js
+grep -q "harmonyOpendapCollection" app.js
+grep -q "application/x-netcdf4;profile=opendap_url" app.js
+grep -q "p.set(\x27f\x27,fmt)" app.js
 grep -q "concatenate" app.js
 grep -q "Math.min(12,chunks.length)" app.js
 grep -q "fetchAlternatives" app.js
 grep -q "Open-Meteo Air Quality" app.js
 grep -q "NASA POWER" app.js
 grep -q "WorldPop" app.js
+grep -q "downloadAlternativeProvider" app.js
+grep -q "Download this source CSV" app.js
+grep -q "nasa_satellite_" app.js
+grep -q "openaq_" app.js
 test -f supabase/functions/alternative-proxy/index.ts
 ! grep -q "q.map((g,i)=>convertOneGranule" app.js
 grep -q "granule-worker.js" app.js
