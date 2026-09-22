@@ -11,24 +11,25 @@ const allowedHosts = [
   "alaska.edu",
 ];
 
-function urlAllowed(url: URL) {
+function isGesdiscS3(url: URL) {
   const h = url.hostname.toLowerCase();
-  if (allowedHosts.some((suffix) => h === suffix || h.endsWith("." + suffix))) return true;
-
-  const virtualHostedGesdisc =
+  const virtualHosted =
     h === "gesdisc-cumulus-prod-protected.s3.us-west-2.amazonaws.com" ||
     h === "gesdisc-cumulus-prod-protected.s3.amazonaws.com" ||
     h === "gesdisc-cumulus-prod-protected.s3-us-west-2.amazonaws.com";
-
-  if (virtualHostedGesdisc) return true;
-
-  const pathStyleGesdisc =
+  const pathStyle =
     (h === "s3.us-west-2.amazonaws.com" ||
      h === "s3.amazonaws.com" ||
      h === "s3-us-west-2.amazonaws.com") &&
     url.pathname.startsWith("/gesdisc-cumulus-prod-protected/");
+  return virtualHosted || pathStyle;
+}
 
-  return pathStyleGesdisc;
+function urlAllowed(url: URL) {
+  const h = url.hostname.toLowerCase();
+  if (allowedHosts.some((suffix) => h === suffix || h.endsWith("." + suffix))) return true;
+
+  return isGesdiscS3(url);
 }
 
 function cors(origin: string | null) {
@@ -108,14 +109,15 @@ Deno.serve(async (req) => {
       }
 
       const cookieHeader = [...cookies.values()].filter(Boolean).join("; ");
+      const s3Hop = isGesdiscS3(current);
       upstream = await fetch(current.toString(), {
         method: "GET",
         redirect: "manual",
         headers: {
-          "Authorization": "Bearer " + token,
           "Accept": "*/*",
           "User-Agent": "earthdata-downloader/1.0",
-          ...(cookieHeader ? { "Cookie": cookieHeader } : {}),
+          ...(!s3Hop ? { "Authorization": "Bearer " + token } : {}),
+          ...(!s3Hop && cookieHeader ? { "Cookie": cookieHeader } : {}),
         },
       });
 
