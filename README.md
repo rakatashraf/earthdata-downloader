@@ -29,9 +29,12 @@ Credentials are entered at runtime. Earthdata and OpenAQ credentials are not com
 - If no exact-period NASA granules exist, the nearest prior granule is used.
 - Multiple collections can be selected.
 - All granules in the selected scope are attempted; there is no artificial 50-granule conversion cap.
-- All selected granule download tasks are launched together with `Promise.allSettled()`.
-- Scientific parsing runs in dedicated per-granule Web Workers, so NetCDF/HDF5/GeoTIFF conversions can execute in parallel instead of one-by-one on the main UI thread.
-- One granule failure does not cancel the rest of the parallel batch.
+- Granules are processed through a bounded reliability-first parallel worker pool instead of unbounded fan-out.
+- Worker count adapts to browser CPU and memory hints, with a hard safety ceiling.
+- Scientific parsing runs in reusable Web Workers so NetCDF/HDF5/GeoTIFF conversions execute in parallel without creating thousands of workers.
+- Transient download/worker failures are retried automatically with exponential backoff and jitter, up to seven attempts.
+- Authorization-blocked and genuinely non-convertible granules are reported separately from transient failures.
+- One granule failure does not cancel the rest of the batch.
 - Transient NASA download failures are retried.
 - NASA authentication redirects are followed server-side.
 - Signed S3 and trusted CloudFront storage redirects are handled without forwarding the Earthdata bearer token to storage/CDN hosts.
@@ -112,7 +115,7 @@ Every push to `main` runs `scripts/validate.sh` before GitHub Pages deployment. 
 
 ## Operational limits
 
-This is an interactive browser-based scientific extractor. Very large multi-year requests can still be constrained by browser RAM, browser worker scheduling, provider connection limits, and the user's network because all requested granules are launched concurrently and converted rows are held client-side before CSV export. The serverless proxies stream files and do not intentionally resample them.
+This is an interactive browser-based scientific extractor. Very large multi-year requests are processed with bounded concurrency to avoid exhausting browser RAM, connection pools, worker slots, or NASA provider limits. Converted rows are still held client-side before CSV export, so extremely large exports can remain browser-memory constrained. The serverless proxies stream files and do not intentionally resample them.
 
 There is no hard one-second-per-granule guarantee; file size, provider latency, authentication redirects, decompression, and device performance determine processing time.
 
