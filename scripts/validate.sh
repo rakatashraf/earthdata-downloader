@@ -16,6 +16,7 @@ grep -q 'id="neCoord"' index.html
 grep -q "const NASA_PROXY_BASE=" app.js
 grep -q "const OPENAQ_PROXY_BASE=" app.js
 grep -q "const ALT_PROXY_BASE=" app.js
+grep -q "const STAGE_PROXY_BASE=" app.js
 ! grep -q "fetch(g.url" app.js
 
 # No silent browser conversion cap and requested-area clipping must exist.
@@ -27,18 +28,14 @@ grep -q "class GranuleWorkerPool" app.js
 grep -q "function conversionConcurrency" app.js
 grep -q "maxAttempts=7" app.js
 grep -q "runReliablePool" app.js
+grep -q "STAGING_BATCH_SIZE=24" app.js
+grep -q "STAGING_CONCURRENCY=12" app.js
+grep -q "stageOne" app.js
+grep -q "stagedBuffer" app.js
+grep -q "cleanupStage" app.js
+grep -q "original source granule(s) queued for Supabase staging" app.js
+test -f supabase/functions/stage-granule/index.ts
 grep -q "Recovery pass:" app.js
-grep -q "harmonySubsetCollection" app.js
-grep -q "harmonySubmitChunk" app.js
-grep -q "skipPreview" app.js
-grep -q "monthChunks" app.js
-grep -q "harmonyVariable" app.js
-grep -q "harmonyOpendapForGranule" app.js
-grep -q "harmonyOpendapCollection" app.js
-grep -q "application/x-netcdf4;profile=opendap_url" app.js
-grep -Fq "p.set('f',fmt)" app.js
-grep -q "concatenate" app.js
-grep -q "Math.min(12,chunks.length)" app.js
 grep -q "fetchAlternatives" app.js
 grep -q "Open-Meteo Air Quality" app.js
 grep -q "NASA POWER" app.js
