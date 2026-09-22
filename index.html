@@ -20,7 +20,10 @@
       <h1>Earthdata Extractor</h1>
       <p class="subtitle">Find only the data you asked for. Revolutionary, apparently.</p>
     </div>
-    <div id="tokenBadge" class="badge muted">Earthdata token not verified</div>
+    <div class="row">
+      <div id="backendBadge" class="badge muted" title="Click to recheck backend health">Backends checking…</div>
+      <div id="tokenBadge" class="badge muted">Earthdata token not verified</div>
+    </div>
   </header>
 
   <main class="shell">
@@ -179,6 +182,7 @@
   <footer>
     <span>NASA CMR + Earthdata Login + OpenAQ</span>
     <span>Source-grid values are preserved. No silent interpolation.</span>
+    <span id="buildStamp">Build 2026.09.22.1</span>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
