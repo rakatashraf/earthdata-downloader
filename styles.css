@@ -228,3 +228,12 @@ footer{
 }
 .bbox-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}
 @media(max-width:620px){.bbox-grid{grid-template-columns:1fr}}
+
+.provider-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px}
+.provider-card{padding:14px;border:1px solid #284838;border-radius:15px;background:#091710}
+.provider-card strong{display:block;margin-bottom:4px}
+.provider-card span{display:block;color:var(--muted);font-size:12px}
+.provider-card.ok{border-color:#3b8159}
+.provider-card.error{border-color:#7a3f3f}
+.provider-card.running{border-color:#715a2a}
+@media(max-width:760px){.provider-grid{grid-template-columns:1fr}}
