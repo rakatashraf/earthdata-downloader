@@ -36,7 +36,7 @@ grep -q "harmonyVariable" app.js
 grep -q "harmonyOpendapForGranule" app.js
 grep -q "harmonyOpendapCollection" app.js
 grep -q "application/x-netcdf4;profile=opendap_url" app.js
-grep -q "p.set(\x27f\x27,fmt)" app.js
+grep -Fq "p.set('f',fmt)" app.js
 grep -q "concatenate" app.js
 grep -q "Math.min(12,chunks.length)" app.js
 grep -q "fetchAlternatives" app.js
