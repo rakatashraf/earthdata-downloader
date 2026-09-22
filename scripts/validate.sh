@@ -27,6 +27,10 @@ grep -q "function conversionConcurrency" app.js
 grep -q "maxAttempts=7" app.js
 grep -q "runReliablePool" app.js
 grep -q "Recovery pass:" app.js
+grep -q "harmonySubsetCollection" app.js
+grep -q "harmonySubmitChunk" app.js
+grep -q "skipPreview" app.js
+grep -q "monthChunks" app.js
 ! grep -q "q.map((g,i)=>convertOneGranule" app.js
 grep -q "granule-worker.js" app.js
 
