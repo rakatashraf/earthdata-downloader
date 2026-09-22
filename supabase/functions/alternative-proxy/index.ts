@@ -7,6 +7,7 @@ const allowedHosts = new Set([
   "archive-api.open-meteo.com",
   "api.open-meteo.com",
   "api.worldpop.org",
+  "power.larc.nasa.gov",
 ]);
 
 function cors(origin: string | null) {
