@@ -94,25 +94,17 @@
 
       <div id="bboxInputs" class="bbox-grid">
         <label>
-          <span>SW latitude</span>
-          <input id="swLat" type="number" step="any" min="-90" max="90" placeholder="23.68" />
+          <span>SW coordinate (latitude, longitude)</span>
+          <input id="swCoord" type="text" inputmode="decimal" placeholder="23.68, 90.30" />
         </label>
         <label>
-          <span>SW longitude</span>
-          <input id="swLon" type="number" step="any" min="-180" max="180" placeholder="90.30" />
-        </label>
-        <label>
-          <span>NE latitude</span>
-          <input id="neLat" type="number" step="any" min="-90" max="90" placeholder="23.90" />
-        </label>
-        <label>
-          <span>NE longitude</span>
-          <input id="neLon" type="number" step="any" min="-180" max="180" placeholder="90.55" />
+          <span>NE coordinate (latitude, longitude)</span>
+          <input id="neCoord" type="text" inputmode="decimal" placeholder="23.90, 90.55" />
         </label>
       </div>
 
       <div class="hint" id="geometryHint">
-        Enter the southwest (SW) and northeast (NE) corners of the area. The app converts them internally to NASA CMR bounding-box order.
+        Enter each corner as latitude, longitude. Example: SW 23.68, 90.30 and NE 23.90, 90.55.
       </div>
 
       <div class="row">
