@@ -29,6 +29,9 @@ Credentials are entered at runtime. Earthdata and OpenAQ credentials are not com
 - If no exact-period NASA granules exist, the nearest prior granule is used.
 - Multiple collections can be selected.
 - All granules in the selected scope are attempted; there is no artificial 50-granule conversion cap.
+- Supported bounding-box collections use NASA Harmony server-side spatial subsetting before browser download, reducing full-swath files to the requested area whenever the collection advertises Harmony bbox support.
+- Large time ranges are split into monthly Harmony jobs and up to four jobs are submitted concurrently, avoiding a single enormous transformation request.
+- Harmony subset outputs use a higher safe worker ceiling because the returned files are much smaller than raw Level-2 swaths.
 - Granules are processed through a bounded reliability-first parallel worker pool instead of unbounded fan-out.
 - Worker count adapts to browser CPU and memory hints, with a hard safety ceiling.
 - Scientific parsing runs in reusable Web Workers so NetCDF/HDF5/GeoTIFF conversions execute in parallel without creating thousands of workers.
