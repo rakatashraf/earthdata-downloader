@@ -129,3 +129,32 @@ There is no hard one-second-per-granule guarantee; file size, provider latency, 
 - NASA CMR GraphQL: https://graphql.earthdata.nasa.gov/api
 - Earthdata Login: https://urs.earthdata.nasa.gov/
 - OpenAQ v3: https://api.openaq.org/v3
+
+
+## Alternative internet sources
+
+Alternative providers are queried automatically in parallel with NASA extraction when they support the requested component. Their rows stay explicitly source-labelled and are included in the master CSV without pretending that different models, sensors, resolutions or methodologies are interchangeable.
+
+Current automated routes:
+
+- **Open-Meteo Air Quality** — PM2.5, PM10, NO2, SO2, O3, CO and aerosol optical depth. The app samples a 3×3 coordinate grid across the requested area and fetches hourly values.
+- **Open-Meteo Historical Weather** — air temperature, relative humidity, precipitation, surface pressure, wind speed and shallow soil moisture.
+- **NASA POWER** — independent hourly point meteorology at the selected area's center for supported variables including temperature, humidity, precipitation, wind and pressure.
+- **WorldPop Global 2** — population totals or population density for the selected area and year.
+
+External requests use the allow-listed Supabase Edge Function `alternative-proxy`. It accepts only documented provider hosts used by this application.
+
+Alternative rows use the same normalized CSV columns as NASA and OpenAQ data. The `source`, `collection`, `variable`, `unit` and `source_url` columns identify their origin.
+
+## Speed path
+
+For Harmony-capable bounding-box collections the extractor prefers NASA-side processing over raw full-granule browser conversion:
+
+1. Harmony capabilities are inspected.
+2. Bounding-box and temporal subsetting are requested.
+3. If variable subsetting is supported, only the requested component variable is sent through the Harmony transformation.
+4. One-year requests are split into monthly chunks and up to 12 monthly jobs are submitted concurrently.
+5. CSV is preferred when Harmony advertises CSV output; otherwise NetCDF is used.
+6. The browser parallel worker pool converts only the reduced outputs.
+
+A hard one-second end-to-end guarantee per remote granule is not possible because provider processing, transfer latency and source-file size are external constraints. The implementation instead minimizes bytes transferred and maximizes safe parallel throughput.
