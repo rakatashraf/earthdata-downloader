@@ -20,6 +20,16 @@ function json(status:number,body:unknown,headers:Record<string,string>){
   return new Response(JSON.stringify(body),{status,headers:{...headers,"Content-Type":"application/json; charset=utf-8"}});
 }
 function safe(s:string){return s.replace(/[^A-Za-z0-9._-]+/g,"_").slice(0,180)||"granule";}
+function sourceFormatFromMagic(head:Uint8Array,filename:string,contentType:string){
+  if(head.length>=4&&head[0]===0x0e&&head[1]===0x03&&head[2]===0x13&&head[3]===0x01)return "hdf4";
+  if(head.length>=8&&head[0]===0x89&&head[1]===0x48&&head[2]===0x44&&head[3]===0x46&&head[4]===0x0d&&head[5]===0x0a&&head[6]===0x1a&&head[7]===0x0a)return "hdf5";
+  const n=filename.toLowerCase(),ct=contentType.toLowerCase();
+  if(n.endsWith(".tif")||n.endsWith(".tiff")||ct.includes("tiff"))return "geotiff";
+  if(n.endsWith(".csv")||ct.includes("text/csv"))return "csv";
+  if(n.endsWith(".json")||n.endsWith(".geojson")||ct.includes("json"))return "json";
+  if(n.endsWith(".nc"))return "netcdf";
+  return "unknown";
+}
 function secretKey(){
   const modern=Deno.env.get("SUPABASE_SECRET_KEYS");
   if(modern){try{return JSON.parse(modern).default||Object.values(JSON.parse(modern))[0] as string}catch{}}
@@ -96,7 +106,7 @@ Deno.serve(async(req)=>{
   if(!upstream.body)return json(502,{error:"NASA returned no file body"},headers);
 
   const contentType=upstream.headers.get("content-type")||"application/octet-stream",reader=upstream.body.getReader(),paths:string[]=[];
-  let pending=new Uint8Array(0),part=0,total=0,uploads:Promise<void>[]=[];
+  let pending=new Uint8Array(0),head=new Uint8Array(0),part=0,total=0,uploads:Promise<void>[]=[];
   const queuePart=(bytes:Uint8Array)=>{
     const index=part++,path=extractionId+"/"+filename+"/part-"+String(index).padStart(5,"0")+".bin";
     paths.push(path);total+=bytes.byteLength;
@@ -108,6 +118,7 @@ Deno.serve(async(req)=>{
     while(true){
       const {done,value}=await reader.read();
       if(done)break;
+      if(head.byteLength<8){const take=Math.min(8-head.byteLength,value.byteLength),nextHead=new Uint8Array(head.byteLength+take);nextHead.set(head);nextHead.set(value.slice(0,take),head.byteLength);head=nextHead}
       const next=new Uint8Array(pending.byteLength+value.byteLength);
       next.set(pending);next.set(value,pending.byteLength);pending=next;
       while(pending.byteLength>=PART_BYTES){
@@ -119,11 +130,12 @@ Deno.serve(async(req)=>{
     if(pending.byteLength)queuePart(pending);
     await flushUploads();
     const metaPath=extractionId+"/"+filename+"/manifest.json";
-    const meta={original_url:target,filename,content_type:contentType,total_bytes:total,parts:paths,created_at:new Date().toISOString()};
+    const sourceFormat=sourceFormatFromMagic(head,filename,contentType);
+    const meta={original_url:target,filename,content_type:contentType,source_format:sourceFormat,total_bytes:total,parts:paths,created_at:new Date().toISOString()};
     const {error:me}=await supabase.storage.from(BUCKET).upload(metaPath,new Blob([JSON.stringify(meta)],{type:"application/json"}),{contentType:"application/json",upsert:true,cacheControl:"0"});
     if(me)throw me;
     const signed=await signParts(supabase,paths);
-    return json(200,{ok:true,filename,content_type:contentType,total_bytes:total,paths,parts:signed,manifest_path:metaPath},headers);
+    return json(200,{ok:true,filename,content_type:contentType,source_format:sourceFormat,total_bytes:total,paths,parts:signed,manifest_path:metaPath},headers);
   }catch(e){
     try{if(paths.length)await removePaths(supabase,paths)}catch{}
     return json(500,{error:"Staging failed",detail:e instanceof Error?e.message:String(e),staged_parts:paths.length},headers);
