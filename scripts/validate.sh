@@ -36,7 +36,7 @@ grep -q "maxAttempts=Math.max(5" app.js
 grep -q "sourceUrls" app.js
 grep -q "stagedBuffer" app.js
 grep -q "cleanupStage" app.js
-grep -q "convertOneReliable(g,start+i,total,progress,pool,6)" app.js
+grep -q "convertOneReliable(g,start+i,total,progress,pool,3)" app.js
 grep -q "Promise.allSettled(ready.map" app.js
 grep -q "original source granule(s) queued for Supabase staging" app.js
 test -f supabase/functions/stage-granule/index.ts
@@ -124,12 +124,21 @@ grep -q "findCoordVar" granule-worker.js
 
 grep -q "h5PickCoord" granule-worker.js
 
-grep -q "granule-worker.js?v=20260924-2008" app.js
 
 ! grep -q "HDF5/NetCDF4 file has no identifiable latitude/longitude datasets" app.js
 
 ! grep -q "HDF5/NetCDF4 file has no identifiable latitude/longitude datasets" granule-worker.js
 
 ! grep -q "ProducerGranuleId||dg.DayNightFlag" app.js
+
+grep -q "granule-worker.js?v=20260924-2216" app.js
+
+grep -Fq "'value' in obj" app.js
+
+grep -Fq "'value' in obj" granule-worker.js
+
+grep -q "return'permanent'" app.js
+
+grep -q "if(!g.url||!g.sourceUrls.length)continue" app.js
 
 echo "Static product validation passed."
