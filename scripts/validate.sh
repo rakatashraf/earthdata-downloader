@@ -45,7 +45,6 @@ grep -q "Open-Meteo Air Quality" app.js
 grep -q "NASA POWER" app.js
 grep -q "WorldPop" app.js
 grep -q "downloadAlternativeProvider" app.js
-grep -q "Download this source CSV" app.js
 grep -q "nasa_satellite_" app.js
 grep -q "openaq_" app.js
 test -f supabase/functions/alternative-proxy/index.ts
@@ -100,5 +99,19 @@ grep -q "const STAC_REGISTRY=" app.js
 grep -q "STAC Index Registry" app.js
 
 grep -q "source_format:g.sourceFormat" app.js
+
+grep -q "Every visible source will have a CSV download" app.js
+
+grep -q "status==='ok'&&Number(p.rows)>0" app.js
+
+grep -q "Download CSV" app.js
+
+grep -q "materializeDiscoveredDataset" app.js
+
+grep -q "fetchPublicTabularResource" app.js
+
+! grep -q "Download source metadata" app.js
+
+! grep -q "downloadProviderMetadata" app.js
 
 echo "Static product validation passed."
