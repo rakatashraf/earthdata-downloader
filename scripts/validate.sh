@@ -95,4 +95,10 @@ grep -q "source_format" supabase/functions/stage-granule/index.ts
 
 grep -q "blob.core.windows.net" supabase/functions/alternative-proxy/index.ts
 
+grep -q "const STAC_REGISTRY=" app.js
+
+grep -q "STAC Index Registry" app.js
+
+grep -q "source_format:g.sourceFormat" app.js
+
 echo "Static product validation passed."
