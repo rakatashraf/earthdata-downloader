@@ -8,6 +8,10 @@ const allowedHosts = new Set([
   "api.open-meteo.com",
   "api.worldpop.org",
   "power.larc.nasa.gov",
+  "planetarycomputer.microsoft.com",
+  "catalog.data.gov",
+  "stac.dataspace.copernicus.eu",
+  "earth-search.aws.element84.com",
 ]);
 
 function cors(origin: string | null) {
@@ -22,6 +26,13 @@ function cors(origin: string | null) {
     "Cache-Control": "no-store",
     "Vary": "Origin",
   };
+}
+
+function allowedTarget(target:URL){
+  if(allowedHosts.has(target.hostname.toLowerCase())) return true;
+  const host=target.hostname.toLowerCase();
+  const signedAzure=host.endsWith(".blob.core.windows.net")&&target.searchParams.has("sig")&&target.searchParams.has("se")&&target.searchParams.has("sp");
+  return signedAzure;
 }
 
 function json(status:number, body:unknown, headers:Record<string,string>) {
@@ -48,7 +59,7 @@ Deno.serve(async req => {
 
   let target:URL;
   try{target=new URL(targetRaw)}catch{return json(400,{error:"Invalid target URL"},headers)}
-  if(target.protocol!=="https:" || !allowedHosts.has(target.hostname.toLowerCase())) {
+  if(target.protocol!=="https:" || !allowedTarget(target)) {
     return json(403,{error:"External provider host is not allow-listed",host:target.hostname},headers);
   }
 
@@ -65,18 +76,18 @@ Deno.serve(async req => {
     const upstream=await fetch(target.toString(),{
       method:req.method,
       headers:{
-        "Accept":"application/json",
+        "Accept":"*/*",
         ...(req.method==="POST"?{"Content-Type":req.headers.get("content-type")||"application/json"}:{})
       },
       body,
       redirect:"follow",
     });
-    const text=await upstream.text();
-    return new Response(text,{
+    return new Response(upstream.body,{
       status:upstream.status,
       headers:{
         ...headers,
-        "Content-Type":upstream.headers.get("content-type")||"application/json; charset=utf-8",
+        "Content-Type":upstream.headers.get("content-type")||"application/octet-stream",
+        ...(upstream.headers.get("content-length")?{"Content-Length":upstream.headers.get("content-length")!}:{}),
         "X-Upstream-Status":String(upstream.status),
       }
     });
