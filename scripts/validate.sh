@@ -114,4 +114,22 @@ grep -q "fetchPublicTabularResource" app.js
 
 ! grep -q "downloadProviderMetadata" app.js
 
+grep -q "identityTokens" app.js
+
+grep -q "findCoordVar" app.js
+
+grep -q "h5PickCoord" app.js
+
+grep -q "findCoordVar" granule-worker.js
+
+grep -q "h5PickCoord" granule-worker.js
+
+grep -q "granule-worker.js?v=20260924-2008" app.js
+
+! grep -q "HDF5/NetCDF4 file has no identifiable latitude/longitude datasets" app.js
+
+! grep -q "HDF5/NetCDF4 file has no identifiable latitude/longitude datasets" granule-worker.js
+
+! grep -q "ProducerGranuleId||dg.DayNightFlag" app.js
+
 echo "Static product validation passed."
