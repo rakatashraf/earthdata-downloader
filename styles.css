@@ -238,3 +238,6 @@ footer{
 .provider-card.error{border-color:#7a3f3f}
 .provider-card.running{border-color:#715a2a}
 @media(max-width:760px){.provider-grid{grid-template-columns:1fr}}
+
+.provider-card.discovered{border-color:#355c74}
+.provider-card.discovered span:first-of-type{color:#9fd4ef}
