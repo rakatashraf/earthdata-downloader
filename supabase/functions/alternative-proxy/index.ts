@@ -12,6 +12,7 @@ const allowedHosts = new Set([
   "catalog.data.gov",
   "stac.dataspace.copernicus.eu",
   "earth-search.aws.element84.com",
+  "raw.githubusercontent.com",
 ]);
 
 function cors(origin: string | null) {
