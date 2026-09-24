@@ -32,10 +32,11 @@ grep -q "STAGING_TARGET_BYTES=700" app.js
 grep -q "stagingBatches" app.js
 grep -q "STAGING_CONCURRENCY=12" app.js
 grep -q "stageOne" app.js
+grep -q "maxAttempts=Math.max(5" app.js
+grep -q "sourceUrls" app.js
 grep -q "stagedBuffer" app.js
 grep -q "cleanupStage" app.js
 grep -q "convertOneReliable(g,start+i,total,progress,pool,6)" app.js
-grep -q "attempt<=5" app.js
 grep -q "Promise.allSettled(ready.map" app.js
 grep -q "original source granule(s) queued for Supabase staging" app.js
 test -f supabase/functions/stage-granule/index.ts
