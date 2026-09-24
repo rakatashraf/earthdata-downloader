@@ -239,5 +239,5 @@ footer{
 .provider-card.running{border-color:#715a2a}
 @media(max-width:760px){.provider-grid{grid-template-columns:1fr}}
 
-.provider-card.discovered{border-color:#355c74}
-.provider-card.discovered span:first-of-type{color:#9fd4ef}
+
+.provider-empty{grid-column:1/-1;padding:14px;border:1px dashed #315441;border-radius:14px;color:var(--muted);font-size:13px}
