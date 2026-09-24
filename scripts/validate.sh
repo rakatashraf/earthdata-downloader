@@ -68,4 +68,30 @@ if grep -REn --exclude-dir=.git --exclude='validate.sh' '(Bearer[[:space:]]+eyJ[
   exit 1
 fi
 
+grep -q "source_format==='hdf4'" app.js
+
+grep -q "convertHdf4ViaPublicCog" app.js
+
+grep -q "filterModisGranulesWithStac" app.js
+
+grep -q "planetarycomputer.microsoft.com" app.js
+
+grep -q "catalog.data.gov" app.js
+
+grep -q "stac.dataspace.copernicus.eu" app.js
+
+grep -q "earth-search.aws.element84.com" app.js
+
+grep -q "rankGranuleUrls" app.js
+
+grep -q "sourceUrls:ranked.map" app.js
+
+grep -q "name not defined" app.js
+
+grep -q "modis_sinusoidal" granule-worker.js
+
+grep -q "source_format" supabase/functions/stage-granule/index.ts
+
+grep -q "blob.core.windows.net" supabase/functions/alternative-proxy/index.ts
+
 echo "Static product validation passed."
