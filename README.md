@@ -93,7 +93,7 @@ For every component query, the application also searches public catalogs dynamic
 - Element 84 Earth Search STAC
 - the daily-updated public STAC Index registry, which broadens discovery beyond the built-in catalog adapters
 
-The number of discovered datasets depends on the component and catalog responses rather than a fixed provider count. Catalog discoveries appear separately with downloadable source metadata. Directly fetched providers expose their own CSV download.
+The number of discovered datasets depends on the component and catalog responses rather than a fixed provider count. Catalog hits are not exposed as alternative sources merely because metadata exists. A discovered dataset is promoted into the Alternative Sources section only after a compatible public CSV/JSON/GeoJSON resource has been fetched, normalized, spatially clipped, and produced usable rows. Every visible alternative source therefore has its own CSV download.
 
 A deployed web app cannot truthfully crawl the entire unrestricted internet and automatically ingest arbitrary websites: many sources require authentication, have incompatible formats/licenses, block automated access, or expose no API. The architecture therefore uses open data catalogs and documented APIs instead of an unsafe arbitrary-URL proxy. Additional catalog adapters can be added without changing the NASA pipeline.
 
@@ -101,8 +101,7 @@ A deployed web app cannot truthfully crawl the entire unrestricted internet and 
 
 - **NASA satellite CSV**: NASA satellite rows only.
 - **OpenAQ CSV**: OpenAQ ground measurements only.
-- **Alternative provider CSV**: one separate CSV per direct alternative provider.
-- **Catalog metadata JSON**: one metadata export per dynamically discovered catalog source.
+- **Alternative provider CSV**: one separate CSV per verified alternative provider, including dynamically discovered providers that successfully yield normalized data.
 - **Granule manifest JSON**: NASA staging/conversion provenance and diagnostics.
 
 Normalized scientific rows use:
