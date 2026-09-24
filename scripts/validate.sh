@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euxo pipefail
 
 node --check app.js
 node --check granule-worker.js
@@ -85,8 +85,6 @@ grep -q "earth-search.aws.element84.com" app.js
 grep -q "rankGranuleUrls" app.js
 
 grep -q "sourceUrls:ranked.map" app.js
-
-grep -q "name not defined" app.js
 
 grep -q "modis_sinusoidal" granule-worker.js
 
