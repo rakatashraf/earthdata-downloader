@@ -91,6 +91,7 @@ For every component query, the application also searches public catalogs dynamic
 - Microsoft Planetary Computer STAC
 - Copernicus Data Space STAC
 - Element 84 Earth Search STAC
+- the daily-updated public STAC Index registry, which broadens discovery beyond the built-in catalog adapters
 
 The number of discovered datasets depends on the component and catalog responses rather than a fixed provider count. Catalog discoveries appear separately with downloadable source metadata. Directly fetched providers expose their own CSV download.
 
