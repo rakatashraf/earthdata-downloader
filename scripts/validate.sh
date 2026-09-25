@@ -188,4 +188,22 @@ grep -q "x-final-url" app.js
 
 grep -q "compression_wrapper" app.js
 
+grep -q "magicFormat(buf)" app.js
+
+grep -q "gunzipBuffer" app.js
+
+grep -q "unzipScientific" app.js
+
+grep -q "downloadFinalUrl" app.js
+
+grep -q "downloadDisposition" app.js
+
+grep -q "unwrapped_bytes" app.js
+
+grep -q "return \"netcdf\"" supabase/functions/stage-granule/index.ts
+
+grep -q "return \"gzip\"" supabase/functions/stage-granule/index.ts
+
+grep -q "return \"zip\"" supabase/functions/stage-granule/index.ts
+
 echo "Static product validation passed."
