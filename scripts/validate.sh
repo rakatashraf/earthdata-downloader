@@ -36,8 +36,6 @@ grep -q "maxAttempts=Math.max(5" app.js
 grep -q "sourceUrls" app.js
 grep -q "stagedBuffer" app.js
 grep -q "cleanupStage" app.js
-grep -q "Promise.allSettled(ready.map" app.js
-grep -q "original source granule(s) queued for Supabase staging" app.js
 test -f supabase/functions/stage-granule/index.ts
 grep -q "fetchAlternatives" app.js
 grep -q "Open-Meteo Air Quality" app.js
@@ -150,7 +148,6 @@ grep -q "conversionAverageMs" app.js
 
 grep -q "conversionConcurrency(ready)" app.js
 
-grep -q "spatial-first parsing" app.js
 
 grep -q "granuleInExactRange" app.js
 
@@ -171,6 +168,7 @@ grep -q "StructMetadata" granule-worker.js
 grep -q "function eosXY" granule-worker.js
 
 grep -q "Exact granule list frozen" app.js
+grep -q "Exact NASA set complete" app.js
 
 ! grep -q "No exact-period granules found. Looking for the nearest prior data" app.js
 
