@@ -124,3 +124,28 @@ No remote data system can have literal O(1) runtime with respect to file count o
 ## Deployment
 
 GitHub Pages deploys only after `scripts/validate.sh` passes. The validation gate covers the SW/NE UI contract, source proxies, staging, worker conversion, scientific metadata handling, HDF4 routing, MODIS public-COG conversion, NASA URL failover, dynamic catalog discovery, separate source exports, and credential-shaped literals.
+
+
+## Exact-granule direct mode
+
+The active NASA path now resolves the complete CMR granule set for the selected collection, geometry and exact requested date range **before any data file is downloaded**.
+
+Pipeline:
+
+1. Query CMR with the selected collection ID, exact temporal range and geometry.
+2. Keep only downloadable, deduplicated granules whose temporal extent intersects the requested range.
+3. Freeze and sort that exact NASA granule list. No nearest-prior fallback is used in this mode.
+4. Download those exact granules directly through the authenticated NASA proxy with failover across CMR Related URLs.
+5. Send each downloaded buffer directly to the conversion worker. Supabase staging is not on the normal critical path anymore.
+6. If a genuine temporary transfer failure survives direct retries, only that failed granule is sent through the Supabase staging recovery path.
+7. Convert to normalized CSV rows and record concept ID, native ID, source URL, actual download endpoint, detected format, bytes, timing, backend and error state in the manifest.
+
+### HDF5 geolocation fallback
+
+HDF5/NetCDF4 conversion now supports three geolocation strategies:
+
+- explicit latitude/longitude arrays, including common NASA names such as `cell_lat` / `cell_lon`;
+- HDF-EOS `StructMetadata` regular grids, including geographic and sinusoidal grid definitions;
+- regular-grid geospatial bound attributes such as geospatial min/max latitude/longitude.
+
+A valid HDF-EOS grid therefore does not need a literal `Latitude` or `Longitude` dataset to be converted.
