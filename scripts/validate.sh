@@ -36,7 +36,6 @@ grep -q "maxAttempts=Math.max(5" app.js
 grep -q "sourceUrls" app.js
 grep -q "stagedBuffer" app.js
 grep -q "cleanupStage" app.js
-grep -q "convertOneReliable(g,start+i,total,progress,pool,3)" app.js
 grep -q "Promise.allSettled(ready.map" app.js
 grep -q "original source granule(s) queued for Supabase staging" app.js
 test -f supabase/functions/stage-granule/index.ts
@@ -138,7 +137,6 @@ grep -q "return'permanent'" app.js
 
 grep -q "if(!g.url||!g.sourceUrls.length)continue" app.js
 
-grep -q "granule-worker.js?v=20260925-2238" app.js
 
 grep -q "function fastKeep" granule-worker.js
 
@@ -153,5 +151,27 @@ grep -q "conversionAverageMs" app.js
 grep -q "conversionConcurrency(ready)" app.js
 
 grep -q "spatial-first parsing" app.js
+
+grep -q "granuleInExactRange" app.js
+
+grep -q "Fast exact mode" app.js
+
+grep -q "directPipelineConcurrency" app.js
+
+grep -q "convertDirectGranule" app.js
+
+grep -q "recoverTransientViaStaging" app.js
+
+grep -q "granule-worker.js?v=20260926-0140" app.js
+
+grep -q "function h5EosSpec" granule-worker.js
+
+grep -q "StructMetadata" granule-worker.js
+
+grep -q "function eosXY" granule-worker.js
+
+grep -q "Exact granule list frozen" app.js
+
+! grep -q "No exact-period granules found. Looking for the nearest prior data" app.js
 
 echo "Static product validation passed."
