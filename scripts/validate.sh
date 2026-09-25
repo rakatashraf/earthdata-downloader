@@ -172,4 +172,20 @@ grep -q "Exact NASA set complete" app.js
 
 ! grep -q "No exact-period granules found. Looking for the nearest prior data" app.js
 
+grep -q "function magicFormat" app.js
+
+grep -q "u\[0\]===0x43&&u\[1\]===0x44&&u\[2\]===0x46" app.js
+
+grep -q "function gunzipBuffer" app.js
+
+grep -q "function unzipScientific" app.js
+
+grep -q "normalizeDownloadedBuffer" app.js
+
+grep -q "fileNameFromDisposition" app.js
+
+grep -q "x-final-url" app.js
+
+grep -q "compression_wrapper" app.js
+
 echo "Static product validation passed."
