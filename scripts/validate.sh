@@ -65,8 +65,7 @@ if grep -REn --exclude-dir=.git --exclude='validate.sh' '(Bearer[[:space:]]+eyJ[
   exit 1
 fi
 
-grep -q "source_format==='hdf4'" app.js
-
+grep -q "if(k==='hdf4')" app.js
 grep -q "convertHdf4ViaPublicCog" app.js
 
 grep -q "filterModisGranulesWithStac" app.js
