@@ -129,7 +129,6 @@ grep -q "h5PickCoord" granule-worker.js
 
 ! grep -q "ProducerGranuleId||dg.DayNightFlag" app.js
 
-grep -q "granule-worker.js?v=20260924-2216" app.js
 
 grep -Fq "'value' in obj" app.js
 
@@ -138,5 +137,21 @@ grep -Fq "'value' in obj" granule-worker.js
 grep -q "return'permanent'" app.js
 
 grep -q "if(!g.url||!g.sourceUrls.length)continue" app.js
+
+grep -q "granule-worker.js?v=20260925-2238" app.js
+
+grep -q "function fastKeep" granule-worker.js
+
+grep -q "function rasterWindow" granule-worker.js
+
+grep -q "readRasters({window:win})" granule-worker.js
+
+grep -q "indexRange(latVals" granule-worker.js
+
+grep -q "conversionAverageMs" app.js
+
+grep -q "conversionConcurrency(ready)" app.js
+
+grep -q "spatial-first parsing" app.js
 
 echo "Static product validation passed."
