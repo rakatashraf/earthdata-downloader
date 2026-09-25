@@ -23,11 +23,19 @@ function safe(s:string){return s.replace(/[^A-Za-z0-9._-]+/g,"_").slice(0,180)||
 function sourceFormatFromMagic(head:Uint8Array,filename:string,contentType:string){
   if(head.length>=4&&head[0]===0x0e&&head[1]===0x03&&head[2]===0x13&&head[3]===0x01)return "hdf4";
   if(head.length>=8&&head[0]===0x89&&head[1]===0x48&&head[2]===0x44&&head[3]===0x46&&head[4]===0x0d&&head[5]===0x0a&&head[6]===0x1a&&head[7]===0x0a)return "hdf5";
+  if(head.length>=4&&head[0]===0x43&&head[1]===0x44&&head[2]===0x46&&(head[3]===0x01||head[3]===0x02||head[3]===0x05))return "netcdf";
+  if(head.length>=4&&((head[0]===0x49&&head[1]===0x49&&head[2]===0x2a&&head[3]===0x00)||(head[0]===0x4d&&head[1]===0x4d&&head[2]===0x00&&head[3]===0x2a)||(head[0]===0x49&&head[1]===0x49&&head[2]===0x2b&&head[3]===0x00)||(head[0]===0x4d&&head[1]===0x4d&&head[2]===0x00&&head[3]===0x2b)))return "geotiff";
+  if(head.length>=2&&head[0]===0x1f&&head[1]===0x8b)return "gzip";
+  if(head.length>=4&&head[0]===0x50&&head[1]===0x4b&&(head[2]===0x03||head[2]===0x05||head[2]===0x07))return "zip";
   const n=filename.toLowerCase(),ct=contentType.toLowerCase();
   if(n.endsWith(".tif")||n.endsWith(".tiff")||ct.includes("tiff"))return "geotiff";
   if(n.endsWith(".csv")||ct.includes("text/csv"))return "csv";
   if(n.endsWith(".json")||n.endsWith(".geojson")||ct.includes("json"))return "json";
-  if(n.endsWith(".nc"))return "netcdf";
+  if(n.endsWith(".nc")||n.endsWith(".cdf")||ct.includes("netcdf"))return "netcdf";
+  if(n.endsWith(".gz")||ct.includes("gzip"))return "gzip";
+  if(n.endsWith(".zip")||ct.includes("zip"))return "zip";
+  if(n.endsWith(".hdf")||n.endsWith(".h4"))return "hdf4";
+  if(n.endsWith(".h5")||n.endsWith(".hdf5")||n.endsWith(".he5")||n.endsWith(".nc4"))return "hdf5";
   return "unknown";
 }
 function secretKey(){
