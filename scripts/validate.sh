@@ -159,8 +159,8 @@ grep -q "convertDirectGranule" app.js
 
 grep -q "recoverTransientViaStaging" app.js
 
-grep -q "granule-worker.js?v=20260926-0140" app.js
 
+grep -q "granule-worker.js?v=20260926-0155" app.js
 grep -q "function h5EosSpec" granule-worker.js
 
 grep -q "StructMetadata" granule-worker.js
