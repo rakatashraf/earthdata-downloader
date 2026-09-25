@@ -22,7 +22,8 @@ function json(status:number,body:unknown,headers:Record<string,string>){
 function safe(s:string){return s.replace(/[^A-Za-z0-9._-]+/g,"_").slice(0,180)||"granule";}
 function sourceFormatFromMagic(head:Uint8Array,filename:string,contentType:string){
   if(head.length>=4&&head[0]===0x0e&&head[1]===0x03&&head[2]===0x13&&head[3]===0x01)return "hdf4";
-  const h5=(off:number)=>off+8<=head.length&&head[off]===0x89&&head[off+1]===0x48&&head[off+2]===0x44&&head[off+3]===0x46&&head[off+4]===0x0d&&head[off+5]===0x0a&&head[off+6]===0x1a&&head[off+7]===0x0a;\n  for(let off=0;off<=65536&&off+8<=head.length;off=off===0?512:off*2)if(h5(off))return "hdf5";
+  const h5=(off:number)=>off+8<=head.length&&head[off]===0x89&&head[off+1]===0x48&&head[off+2]===0x44&&head[off+3]===0x46&&head[off+4]===0x0d&&head[off+5]===0x0a&&head[off+6]===0x1a&&head[off+7]===0x0a;
+  for(let off=0;off<=65536&&off+8<=head.length;off=off===0?512:off*2)if(h5(off))return "hdf5";
   if(head.length>=4&&head[0]===0x43&&head[1]===0x44&&head[2]===0x46&&(head[3]===0x01||head[3]===0x02||head[3]===0x05))return "netcdf";
   if(head.length>=4&&((head[0]===0x49&&head[1]===0x49&&head[2]===0x2a&&head[3]===0x00)||(head[0]===0x4d&&head[1]===0x4d&&head[2]===0x00&&head[3]===0x2a)||(head[0]===0x49&&head[1]===0x49&&head[2]===0x2b&&head[3]===0x00)||(head[0]===0x4d&&head[1]===0x4d&&head[2]===0x00&&head[3]===0x2b)))return "geotiff";
   if(head.length>=2&&head[0]===0x1f&&head[1]===0x8b)return "gzip";
