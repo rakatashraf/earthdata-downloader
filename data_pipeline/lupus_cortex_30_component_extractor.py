@@ -195,8 +195,8 @@ class ExtractorConfig:
     max_lag_hls_days: int = 30
     transit_access_m: float = 500.0
     green_access_m: float = 300.0
-    overpass_timeout_s: int = 120
-    request_timeout_s: int = 90
+    overpass_timeout_s: int = 35
+    request_timeout_s: int = 35
     use_earthdata_optional: bool = False
     strict_no_proxy: bool = False
 
@@ -940,7 +940,7 @@ def _worldpop_geometry(lat, lon, area_km):
     return _bbox_polygon(lat, lon, area_km).__geo_interface__
 
 
-def _worldpop_request(endpoint: str, payload: dict, timeout=90):
+def _worldpop_request(endpoint: str, payload: dict, timeout=35):
     url = f"{WORLDPOP_BASE}/{endpoint.lstrip('/')}"
     try:
         r = requests.post(url, json=payload, timeout=timeout)
@@ -952,7 +952,7 @@ def _worldpop_request(endpoint: str, payload: dict, timeout=90):
     return r.json()
 
 
-def _worldpop_poll(response: dict, timeout=180):
+def _worldpop_poll(response: dict, timeout=45):
     if not isinstance(response, dict):
         return response
     if "result" in response:
