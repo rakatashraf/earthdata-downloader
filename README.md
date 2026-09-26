@@ -168,3 +168,22 @@ After the exact CMR granule list is frozen:
 For smaller exact sets, CMR granule concept IDs are included directly in the Harmony request. Very large sets use the frozen exact temporal/spatial constraints plus the frozen granule count as the processing limit.
 
 A literal universal one-minute guarantee is not technically possible for arbitrary collections because NASA processing time, remote object size and internet throughput are external constraints. Fast Collection Mode minimizes transferred bytes and service overhead so the application has the best practical chance of meeting the one-minute target.
+
+
+## Immediate NASA Download Mode
+
+The normal NASA path no longer waits for Harmony or another server-side preparation job.
+
+Active sequence:
+
+1. CMR searches the exact requested date range and geometry.
+2. Granule metadata pages are fetched in parallel when CMR reports more than one page.
+3. Selected collections are resolved concurrently.
+4. The exact downloadable granule list is deduplicated.
+5. Downloads start immediately.
+6. For each NASA host, the browser briefly attempts a direct authenticated fetch. If that host does not support browser CORS, the result is cached and subsequent granules use the streaming NASA proxy immediately.
+7. Conversion begins as soon as each individual file finishes downloading; there is no requirement for the rest of the collection to become ready first.
+8. Supabase staging is used only for genuine transfer recovery.
+9. Alternative-source fetching is deferred until the NASA extraction has completed so it cannot steal bandwidth or CPU from the main satellite job.
+
+Harmony helper code may remain available for future optional modes, but it is not called by the normal extraction path.
