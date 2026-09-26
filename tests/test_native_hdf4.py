@@ -59,7 +59,7 @@ class NativeTests(unittest.TestCase):
         self.assertAlmostEqual(_degrees(-90015000),-90.25)
     def test_binary_http_endpoint(self):
         client=TestClient(app)
-        self.assertEqual(client.get('/health').json()['formats'],['hdf4'])
+        formats=client.get('/health').json()['formats'];self.assertIn('hdf4',formats);self.assertIn('hdf5',formats);self.assertIn('netcdf',formats);self.assertIn('geotiff',formats);self.assertIn('ascii',formats);self.assertIn('json',formats);self.assertIn('zarr',formats)
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'test.hdf';fixture(p)
             response=client.post('/convert',params={'component':'NDVI','bbox':'[90,23,91,24]'},content=p.read_bytes(),headers={'Content-Type':'application/octet-stream','Origin':'https://rakatashraf.github.io'})

@@ -75,6 +75,21 @@ The supplied service is intended for loopback use. A shared deployment needs
 operator-managed authentication, request quotas, TLS and an explicit origin list.
 Do not expose this local service directly to the public internet.
 
+## Format coverage
+
+The extraction path now uses two layers. The browser/Web Worker handles common
+GeoTIFF, classic NetCDF, HDF5/NetCDF4/HDF-EOS5, CSV, ASCII/plain text and JSON
+directly. If a browser parser cannot safely normalize the scientific layout, the
+native compatibility service retries with Python libraries (xarray/netCDF4/h5netcdf,
+rasterio, pandas). Zarr is handled as a chunked store through fsspec/xarray rather
+than pretending it is a single downloadable file.
+
+The native service advertises: HDF4, HDF5, HDF-EOS5, NetCDF, GeoTIFF,
+ASCII/plain text, CSV, JSON/GeoJSON and Zarr. HDF-EOS5 remains HDF5-based, but
+its geolocation conventions can vary by product; the browser HDF-EOS metadata
+parser is attempted first and xarray is the fallback. For Zarr, HTTP(S) and S3
+stores are supported where the DAAC's authentication/access method permits it.
+
 ## Supported browser paths
 
 - GeoTIFF, NetCDF classic, HDF5/NetCDF4/HE5, CSV and JSON through Web Workers.

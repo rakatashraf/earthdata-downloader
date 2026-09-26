@@ -274,7 +274,7 @@ grep -q "MAX_TOTAL_DIRECT_GRANULES" app.js
 grep -q "totalDirectTooLarge" app.js
 grep -q "STRUCTURAL_RE" app.js
 grep -q "collection-preflight-block" app.js
-grep -q "granule-worker.js?v=20260926-1618" app.js
+grep -q "granule-worker.js?v=20260926-1645" app.js
 grep -q "loadTesvisProducts" app.js
 grep -q "fetchTesvisCollection" app.js
 grep -q "Raw HDF4 only" app.js
@@ -284,6 +284,14 @@ grep -q "function h5L3Binned" granule-worker.js
 grep -q "NASA Level-3 integerized-sinusoidal bins" granule-worker.js
 grep -q "No completed cache. Resolving exact CMR granules" app.js
 grep -q "bounded direct granule job(s) after server-side routing" app.js
+test -f backend/native_science.py
+grep -q "convert_zarr" backend/native_science.py
+grep -q "rasterio" backend/native_science.py
+grep -q "xarray" backend/native_science.py
+grep -q "plain-text" backend/server.py
+grep -q "format==='text'" granule-worker.js
+grep -q "convertRemoteZarr" app.js
+grep -q "convertNativeGeneric" app.js
 grep -q "Ready in " app.js
 ! grep -q "No public COG mirror collection found" app.js
 echo "Static product validation passed."
