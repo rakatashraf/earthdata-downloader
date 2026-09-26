@@ -179,6 +179,71 @@ def fallback_open_meteo(df):
         except Exception as e:
             print("weather fallback failed",lid,e,flush=True)
 
+def fill_closest_nightlights(df):
+    """Use the closest public VIIRS-derived HREA radiance composite when 2025 Black Marble needs EDL auth."""
+    try:
+        from pystac_client import Client
+        import planetary_computer
+        import rasterio
+    except Exception as e:
+        print("night-light fallback imports failed", e, flush=True)
+        return
+    try:
+        cat = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1",
+                          modifier=planetary_computer.sign_inplace)
+    except Exception as e:
+        print("night-light catalog failed", e, flush=True)
+        return
+    for lid,g in df.groupby("location_id"):
+        m=(df.location_id==lid)&(df.component=="NIGHT_LIGHTS")&df.value.isna()
+        if not m.any():
+            continue
+        lat=float(g.lat.iloc[0]); lon=float(g.lon.iloc[0])
+        value=np.nan
+        item_date=None
+        item_id=""
+        try:
+            items=list(cat.search(
+                collections=["hrea"],
+                intersects={"type":"Point","coordinates":[lon,lat]},
+                datetime="2019-01-01/2020-12-31",
+                max_items=20
+            ).items())
+            items=sorted(items,key=lambda x:x.datetime or pd.Timestamp("1900-01-01",tz="UTC").to_pydatetime(),reverse=True)
+            for item in items:
+                asset=item.assets.get("light-composite")
+                if asset is None:
+                    continue
+                try:
+                    with rasterio.open(asset.href) as ds:
+                        z=float(next(ds.sample([(lon,lat)]))[0])
+                        if ds.nodata is not None and z==ds.nodata:
+                            continue
+                        if np.isfinite(z) and z>-99999:
+                            value=z
+                            item_date=pd.Timestamp(item.datetime).tz_localize(None).normalize() if item.datetime else pd.Timestamp("2019-12-31")
+                            item_id=item.id
+                            break
+                except Exception:
+                    continue
+        except Exception as e:
+            print("night-light HREA search failed",lid,e,flush=True)
+        if not np.isfinite(value):
+            continue
+        idx=df.loc[m].index
+        df.loc[idx,"value"]=value
+        df.loc[idx,"status"]="closest_available_observed"
+        df.loc[idx,"source"]="HREA VIIRS-derived nighttime-light composite via Microsoft Planetary Computer"
+        df.loc[idx,"dataset"]="HREA"
+        df.loc[idx,"variable"]="light-composite"
+        df.loc[idx,"method"]="Closest public annual VIIRS-derived radiance composite because 2025 VNP46A3 requires Earthdata authentication"
+        df.loc[idx,"measurement_date"]=item_date.strftime("%Y-%m-%d") if item_date is not None else "2019-12-31"
+        df.loc[idx,"lag_days"]=(pd.to_datetime(df.loc[idx,"date"])-item_date).dt.days if item_date is not None else np.nan
+        df.loc[idx,"is_proxy"]=True
+        df.loc[idx,"unit"]="radiance / HREA light-composite"
+        df.loc[idx,"metadata_json"]='{"fallback_reason":"2025 VNP46A3 requires EDL authentication","HREA_item":"'+item_id+'"}'
+
+
 def rolling_rank(s):
     out=[]
     for i,x in enumerate(s.to_numpy(dtype=float)):
@@ -240,6 +305,7 @@ def actual_url(source):
     if "openstreetmap" in s or "overpass" in s: return "https://overpass-api.de/api/interpreter"
     if "open-meteo air" in s: return "https://air-quality-api.open-meteo.com/v1/air-quality"
     if "open-meteo" in s: return "https://archive-api.open-meteo.com/v1/archive"
+    if "hrea" in s: return "https://planetarycomputer.microsoft.com/api/stac/v1/collections/hrea"
     if "black marble" in s: return "https://ladsweb.modaps.eosdis.nasa.gov/archive/allData/5200/VNP46A3/2025/"
     if "derived" in s or "lupus cortex" in s: return "derived from rows in this CSV"
     return ""
@@ -252,6 +318,7 @@ def main():
     df=df[(df.date>=pd.Timestamp(START))&(df.date<=pd.Timestamp(END))].copy()
     df["value"]=pd.to_numeric(df["value"],errors="coerce")
     fallback_open_meteo(df)
+    fill_closest_nightlights(df)
     recompute_derived(df)
     cid={k:i+1 for i,k in enumerate(ORDER)}
     cname=dict(zip(ORDER,NAMES))
