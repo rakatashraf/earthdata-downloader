@@ -9,8 +9,10 @@ await h5.ready;
 globalThis.self={};
 const wasmUrl=import.meta.resolve('h5wasm/node');
 const source=fs.readFileSync(new URL('../granule-worker.js',import.meta.url),'utf8')
+ // Browser builds use MEMFS; Node builds use the real filesystem.
+ .replace("name='/granule_'", 'name='+JSON.stringify(path.join(os.tmpdir(),'granule_')))
  .replace('https://cdn.jsdelivr.net/npm/h5wasm@0.10.3/dist/esm/hdf5_hl.js',wasmUrl);
-const parsers=await import('data:text/javascript;base64,'+Buffer.from(source+'\nexport {parseHdf5,l3BinCenters};').toString('base64'));
+const parsers=await import('data:text/javascript;base64,'+Buffer.from(source+'\nexport {parseHdf5,l3BinCenters};\n//# sourceURL=earthdata-worker-under-test.mjs').toString('base64'));
 function fixture(build){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'earthdata-test-'));
  const file=path.join(dir,'science.h5');
