@@ -165,7 +165,6 @@ grep -q "StructMetadata" granule-worker.js
 
 grep -q "function eosXY" granule-worker.js
 
-grep -q "Exact granule list frozen" app.js
 
 ! grep -q "No exact-period granules found. Looking for the nearest prior data" app.js
 
@@ -220,9 +219,7 @@ grep -q "maxResults" app.js
 
 
 
-grep -q "Instant mode: resolving exact CMR granules in parallel" app.js
 
-grep -q "NASA ready in" app.js
 
 grep -q "NASA_DIRECT_HOST_MODE" app.js
 
@@ -263,5 +260,15 @@ grep -q "All .* granules loaded from converted cache" app.js
 test -f supabase/functions/converted-cache/index.ts
 
 grep -q "converted_cache_index" supabase/functions/converted-cache/index.ts
+
+grep -q "Checking completed-request cache" app.js
+
+grep -q "No whole-request cache. Resolving exact CMR granules in parallel" app.js
+
+grep -q "Checking per-granule converted cache" app.js
+
+grep -q "Instant cache hit" app.js
+
+grep -q "NASA/cache ready in" app.js
 
 echo "Static product validation passed."
