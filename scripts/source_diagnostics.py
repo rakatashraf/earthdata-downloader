@@ -38,3 +38,11 @@ print("tiflinks",len(links)); print("\n".join(links[:30]))
 for pat in ["bgd_t_00_2025","bgd_t_01_2025","bgd_t_65_2025","bgd_t_90_2025"]:
     m=re.search(r'href=["\\\']([^"\\\']*'+re.escape(pat)+r'[^"\\\']*)',t,re.I)
     print(pat, m.group(1) if m else None)
+
+print("\nGPM COLLECTION ASSET")
+g=requests.get(f"{STAC}/collections/gpm-imerg-hhr",timeout=60).json()
+print(json.dumps((g.get("assets") or {}).get("zarr-abfs"),indent=2)[:6000])
+for nm in ["met_tavg_1hr_g1440x721_x1","xgc_tavg_1hr_g1440x721_x1"]:
+    txt=requests.get(f"https://opendap.nccs.nasa.gov/dods/gmao/geos-cf/assim/{nm}.dds",timeout=60).text
+    names=re.findall(r"Float32\\s+([A-Za-z0-9_]+)\\[",txt)
+    print("\nMATCH",nm,[x for x in names if any(k in x.lower() for k in ["prec","tprec","aod550","rh","pm10"])][:100])
