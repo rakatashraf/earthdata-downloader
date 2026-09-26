@@ -1,0 +1,6 @@
+location_id,name,lat,lon
+LC_NW,Northwest,24.3000,89.7500
+LC_NE,Northeast,24.3000,90.8000
+LC_DHAKA,Dhaka_Center,23.8103,90.4125
+LC_SW,Southwest,23.3000,89.7500
+LC_SE,Southeast,23.3000,90.8000
