@@ -280,3 +280,4 @@ grep -q "native granule(s) remain after official subset routing" app.js
 grep -q "Ready in " app.js
 ! grep -q "No public COG mirror collection found" app.js
 echo "Static product validation passed."
+\ngrep -q "tryHarmonyFastCollection(cc,gs)" app.js\ngrep -q "MAX_DIRECT_GRANULES_PER_COLLECTION" app.js\ngrep -q "STRUCTURAL_RE" app.js\n
