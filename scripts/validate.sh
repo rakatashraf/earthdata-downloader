@@ -60,13 +60,13 @@ grep -q "isSignedS3" supabase/functions/nasa-proxy/index.ts
 grep -q "d2b3c3wh8s6en5.cloudfront.net" supabase/functions/nasa-proxy/index.ts
 
 # Reject obvious credential-shaped literals.
-if grep -REn --exclude-dir=.git --exclude='validate.sh' '(Bearer[[:space:]]+eyJ[A-Za-z0-9_-]{20,}|[0-9a-fA-F]{64})' .; then
+if grep -REn --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude='validate.sh' '(Bearer[[:space:]]+eyJ[A-Za-z0-9_-]{20,}|[0-9a-fA-F]{64})' .; then
   echo 'Credential-shaped literal detected. Refusing deployment.'
   exit 1
 fi
 
 grep -q "if(k==='hdf4')" app.js
-grep -q "convertHdf4ViaPublicCog" app.js
+! grep -q "async function convertHdf4ViaPublicCog" app.js
 
 grep -q "filterModisGranulesWithStac" app.js
 
@@ -267,7 +267,7 @@ grep -q "Checking completed-request cache" app.js
 grep -q "Instant cache hit" app.js
 
 grep -q "EDD_DOWNLOAD_CONCURRENCY=5" app.js
-grep -q "granule-worker.js?v=20260926-1410" app.js
+grep -q "granule-worker.js?v=20260926-1600" app.js
 grep -q "loadTesvisProducts" app.js
 grep -q "fetchTesvisCollection" app.js
 grep -q "Raw HDF4 only" app.js

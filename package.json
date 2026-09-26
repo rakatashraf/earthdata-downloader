@@ -1,0 +1,6 @@
+{
+  "name": "earthdata-downloader",
+  "private": true,
+  "scripts": {"test": "node --test tests/*.test.cjs tests/*.test.mjs"},
+  "devDependencies": {"h5wasm": "0.10.3"}
+}

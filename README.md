@@ -1,207 +1,140 @@
 # Earthdata Extractor
 
-A browser-based NASA Earth Observation extractor with authenticated source retrieval, temporary raw-file staging, scientific conversion, spatial clipping, ground observations, and dynamic alternative-source discovery.
-
-## Live app
-
-https://rakatashraf.github.io/earthdata-downloader/
-
-## Active architecture
-
-### NASA source path
-
-1. Search NASA CMR for collections and granules inside the requested date/spatial scope.
-2. Retain and rank all useful CMR Related URLs for each granule.
-3. Fail over across alternate CMR data/service endpoints when the preferred source URL fails.
-4. Download the original NASA file once through the authenticated `nasa-proxy`.
-5. Stage the original bytes temporarily in the private Supabase Storage bucket `earthdata-staging`.
-6. Detect the scientific format from file magic bytes before conversion.
-7. Convert staged files in parallel Web Workers where the format is browser-compatible.
-8. Clip normalized rows to the requested geometry.
-9. Delete temporary staged parts after the batch has been processed.
-
-The staging bucket is private. Large source files are split into 5 MB binary parts so the source can be preserved byte-for-byte even though the current Supabase Free project has a 50 MB per-object limit.
-
-Batches are quota-aware: CMR-reported file sizes are used to target roughly 700 MB of temporary staged data, with at most 24 granules per batch and up to 12 source downloads in parallel.
-
-### HDF4 / MODIS handling
-
-HDF4 and HDF5 are different formats. HDF4 files are detected from their magic bytes and are never sent to `h5wasm`.
-
-For MODIS HDF-EOS2 products with a matching public Microsoft Planetary Computer representation:
-
-1. The original NASA HDF4 granule is staged first.
-2. A spatial STAC search identifies only public mirror items intersecting the requested area/date.
-3. CMR results are cross-checked against those item signatures, which prevents global MODIS tiles from being staged when only a small area was requested.
-4. Matching Cloud-Optimized GeoTIFF science assets are selected by component name.
-5. A dataset SAS token is cached and used to read the public COG.
-6. Native MODIS sinusoidal coordinates are converted to WGS84 without interpolating the source pixel values.
-7. Raster scale/offset/no-data metadata are applied.
-8. The output remains in the NASA satellite CSV and records the conversion backend/mirror collection in the manifest.
-
-### Browser-native formats
-
-The current browser workers support:
-
-- GeoTIFF / COG
-- NetCDF classic
-- HDF5
-- HE5
-- NetCDF4 encoded as HDF5
-- CSV
-- JSON / GeoJSON
-
-Scientific safeguards include `_FillValue`, `missing_value`, `valid_min`, `valid_max`, `scale_factor`, `add_offset`, native-grid preservation, and requested-geometry clipping.
-
-## NASA failure recovery
-
-A granule is not tied to a single URL. CMR Related URLs are ranked and alternate direct/service endpoints are retained. Staging rotates through those endpoints with retry/backoff before marking a source as unavailable.
-
-Deterministic programming/format errors such as `ReferenceError`, `name not defined`, an HDF4/HDF5 mismatch, or an unsupported scientific alignment are not pointlessly retried as if the sixth identical exception might become philosophical and change its mind.
-
-The manifest records:
-
-- canonical source URL
-- source URL candidate count
-- source URL that actually staged successfully
-- staging status/attempts/bytes/duration/error
-- detected source format
-- conversion status/backend/attempts/duration/error
-- mirror collection when used
-- source-grid row count
-- final in-area row count
-
-## Dynamic alternative-source discovery
-
-Alternative data is never merged into the NASA satellite CSV.
-
-The application has two alternative-source layers:
-
-### Direct adapters
-
-When a compatible documented API exists, values are fetched immediately. Current adapters include Open-Meteo air quality/weather, NASA POWER, WorldPop, and OpenAQ ground observations.
-
-These adapters are not the discovery ceiling.
-
-### Dynamic catalogs
-
-For every component query, the application also searches public catalogs dynamically, including:
-
-- Data.gov CKAN
-- Microsoft Planetary Computer STAC
-- Copernicus Data Space STAC
-- Element 84 Earth Search STAC
-- the daily-updated public STAC Index registry, which broadens discovery beyond the built-in catalog adapters
-
-The number of discovered datasets depends on the component and catalog responses rather than a fixed provider count. Catalog hits are not exposed as alternative sources merely because metadata exists. A discovered dataset is promoted into the Alternative Sources section only after a compatible public CSV/JSON/GeoJSON resource has been fetched, normalized, spatially clipped, and produced usable rows. Every visible alternative source therefore has its own CSV download.
-
-A deployed web app cannot truthfully crawl the entire unrestricted internet and automatically ingest arbitrary websites: many sources require authentication, have incompatible formats/licenses, block automated access, or expose no API. The architecture therefore uses open data catalogs and documented APIs instead of an unsafe arbitrary-URL proxy. Additional catalog adapters can be added without changing the NASA pipeline.
-
-## Separate exports
-
-- **NASA satellite CSV**: NASA satellite rows only.
-- **OpenAQ CSV**: OpenAQ ground measurements only.
-- **Alternative provider CSV**: one separate CSV per verified alternative provider, including dynamically discovered providers that successfully yield normalized data.
-- **Granule manifest JSON**: NASA staging/conversion provenance and diagnostics.
-
-Normalized scientific rows use:
-
-`latitude, longitude, timestamp, date, value, variable, unit, satellite, collection, granule, data_cycle, source, source_url`
-
-## Geometry
-
-Bounding boxes use exactly two inputs:
-
-- SW: `latitude, longitude`
-- NE: `latitude, longitude`
-
-Polygon, circle, point, and line requests are also supported. Returned source-grid rows are clipped again after conversion.
-
-## Complexity and throughput
-
-No remote data system can have literal O(1) runtime with respect to file count or total bytes. Every source byte must be transferred at least once. The extractor minimizes repeated work by staging each original once, using parallel I/O/worker conversion, spatially filtering MODIS tiles before staging, caching public STAC mappings/tokens, and avoiding retries for deterministic parser errors.
-
-## Deployment
-
-GitHub Pages deploys only after `scripts/validate.sh` passes. The validation gate covers the SW/NE UI contract, source proxies, staging, worker conversion, scientific metadata handling, HDF4 routing, MODIS public-COG conversion, NASA URL failover, dynamic catalog discovery, separate source exports, and credential-shaped literals.
-
-
-## Exact-granule direct mode
-
-The active NASA path now resolves the complete CMR granule set for the selected collection, geometry and exact requested date range **before any data file is downloaded**.
-
-Pipeline:
-
-1. Query CMR with the selected collection ID, exact temporal range and geometry.
-2. Keep only downloadable, deduplicated granules whose temporal extent intersects the requested range.
-3. Freeze and sort that exact NASA granule list. No nearest-prior fallback is used in this mode.
-4. Download those exact granules directly through the authenticated NASA proxy with failover across CMR Related URLs.
-5. Send each downloaded buffer directly to the conversion worker. Supabase staging is not on the normal critical path anymore.
-6. If a genuine temporary transfer failure survives direct retries, only that failed granule is sent through the Supabase staging recovery path.
-7. Convert to normalized CSV rows and record concept ID, native ID, source URL, actual download endpoint, detected format, bytes, timing, backend and error state in the manifest.
-
-### HDF5 geolocation fallback
-
-HDF5/NetCDF4 conversion now supports three geolocation strategies:
-
-- explicit latitude/longitude arrays, including common NASA names such as `cell_lat` / `cell_lon`;
-- HDF-EOS `StructMetadata` regular grids, including geographic and sinusoidal grid definitions;
-- regular-grid geospatial bound attributes such as geospatial min/max latitude/longitude.
-
-A valid HDF-EOS grid therefore does not need a literal `Latitude` or `Longitude` dataset to be converted.
-
-
-## Fast Collection Mode
-
-The active extractor targets a 60-second wall-clock completion time for a selected collection when NASA service capabilities and network conditions make that feasible.
-
-After the exact CMR granule list is frozen:
-
-1. Small collections skip service-orchestration overhead and use aggressive parallel direct download/conversion.
-2. Larger collections query the NASA Harmony capabilities endpoint.
-3. When the collection supports bounding-box reduction, Harmony is asked to process only the selected SW/NE area, exact time window and matching component variable when available.
-4. Concatenation is requested when the collection supports it, reducing many input granules to one or a few outputs.
-5. CSV output is preferred when Harmony advertises it; otherwise reduced NetCDF/GeoTIFF/HDF outputs are downloaded and converted locally.
-6. Harmony fast processing has a strict time budget. If it does not complete quickly enough, the browser falls back to the exact-granule direct path instead of waiting indefinitely.
-7. Direct fallback parallelism scales with file size, CPU and available browser memory.
-
-For smaller exact sets, CMR granule concept IDs are included directly in the Harmony request. Very large sets use the frozen exact temporal/spatial constraints plus the frozen granule count as the processing limit.
-
-A literal universal one-minute guarantee is not technically possible for arbitrary collections because NASA processing time, remote object size and internet throughput are external constraints. Fast Collection Mode minimizes transferred bytes and service overhead so the application has the best practical chance of meeting the one-minute target.
-
-
-## Immediate NASA Download Mode
-
-The normal NASA path no longer waits for Harmony or another server-side preparation job.
-
-Active sequence:
-
-1. CMR searches the exact requested date range and geometry.
-2. Granule metadata pages are fetched in parallel when CMR reports more than one page.
-3. Selected collections are resolved concurrently.
-4. The exact downloadable granule list is deduplicated.
-5. Downloads start immediately.
-6. For each NASA host, the browser briefly attempts a direct authenticated fetch. If that host does not support browser CORS, the result is cached and subsequent granules use the streaming NASA proxy immediately.
-7. Conversion begins as soon as each individual file finishes downloading; there is no requirement for the rest of the collection to become ready first.
-8. Supabase staging is used only for genuine transfer recovery.
-9. Alternative-source fetching is deferred until the NASA extraction has completed so it cannot steal bandwidth or CPU from the main satellite job.
-
-Harmony helper code may remain available for future optional modes, but it is not called by the normal extraction path.
-
-
-## Cache-first historical extraction
-
-Repeated historical extraction is now cache-first.
-
-Before contacting NASA, the application checks:
-
-1. a whole-request cache keyed by selected collections, component, exact date range, geometry and parser schema;
-2. a per-granule cache keyed by NASA granule identity, collection, component, geometry and parser schema.
-
-The local browser cache uses IndexedDB. A shared private Supabase Storage cache is also used for compact converted granule outputs, with an indexed Postgres lookup table so thousands of granule keys can be checked in batches.
-
-Successful granules are cached immediately as they are converted. If a large extraction is interrupted, the next run reuses completed granules and downloads only cache misses.
-
-A fully completed request is cached as a whole-request result. Repeating the identical request on the same browser can therefore skip CMR, NASA download and scientific conversion entirely.
-
-Shared converted-cache objects are gzip-compressed and intentionally size-limited so the Free-plan Supabase Storage quota is not exhausted by giant artifacts.
+[Open the app](https://rakatashraf.github.io/earthdata-downloader/).
+
+Search exact NASA CMR collections and granules for a component, date range and
+geometry, convert supported science data, and export NASA and alternative sources
+separately. The browser uses the existing authenticated NASA proxy. Tokens stay
+in session storage and are sent only to NASA and the configured NASA proxy.
+
+## September 26 reliability fixes
+
+- Fixed the GitHub Pages validation failure and synchronized app/worker asset
+  versions. Old worker code must not survive a parser release.
+- Fixed ORNL `/products` and `/bands` JSON envelopes. Failed discovery can retry.
+  Only supported sinusoidal products use this adapter; EASE grids are not
+  incorrectly treated as MODIS sinusoidal grids.
+- Added an original HDF4 converter for two-dimensional HDF-EOS geographic and
+  sinusoidal science grids, including the layouts of MOD13A2 and MOD13C1.
+  There is no requirement for a public COG mirror or silent product substitution.
+- Fixed HDF5 attributes exposed through prototype getters, preserving packing,
+  fill values and units. Level-3 compound fields are resolved by metadata;
+  bin numbers yield native coordinates and science means use `sum / weights`.
+- Valid empty spatial intersections are accepted for Level-3 bins and aligned
+  HDF5 grids. Missing variables, malformed records and unknown layouts remain
+  explicit failures; arbitrary variables are not substituted for the component.
+- ORNL request failures and missing dates cannot be reported as a complete cached
+  result. A failed subset collection does not discard other resolved collections.
+- CMR pagination errors no longer silently truncate the result list.
+- Search selects one compatible collection by default. Users can select more or
+  use Select All. Selecting every NDVI collection can queue thousands of files.
+- Download concurrency is bounded at five. Authorization errors block remaining
+  work for that collection while other collections continue. Optional remote cache
+  lookups time out; successful local cache writes are awaited before completion.
+- Point extraction retains each timestamp rather than collapsing an entire time
+  series to one nearest pixel.
+
+## Run original HDF4 conversion
+
+GitHub Pages serves static JavaScript. It cannot execute Python or HDF4 native
+libraries. Run this companion service on your computer before searching for
+MOD13A2/MOD13C1. It receives the downloaded file bytes, **not your Earthdata token**.
+
+From a checkout of this repository with Docker running:
+
+```sh
+docker build -t earthdata-native backend
+docker run --rm -p 127.0.0.1:8000:8000 earthdata-native
+```
+
+Open the app, expand **Original HDF4 conversion**, leave the URL at
+`http://localhost:8000`, and search again. Your browser may request local-network
+access. The service must remain running during extraction.
+
+Without Docker:
+
+```sh
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r backend/requirements.txt
+python -m uvicorn server:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+The converter verifies the HDF4 signature, reads grid metadata, extracts the
+requested bounding window, applies fill/range/scale rules, and returns original
+pixel centers. The browser applies the final polygon/circle/point/line clipping.
+Uploads are streamed to temporary files and deleted after conversion. HDF4 reads
+are serialized because the native library is not thread safe. Limits: 512 MB per
+file and two million source pixels per subset. Other HDF4 layouts require their
+own validated adapter and are reported as unsupported.
+
+The supplied service is intended for loopback use. A shared deployment needs
+operator-managed authentication, request quotas, TLS and an explicit origin list.
+Do not expose this local service directly to the public internet.
+
+## Supported browser paths
+
+- GeoTIFF, NetCDF classic, HDF5/NetCDF4/HE5, CSV and JSON through Web Workers.
+- HDF5 explicit coordinates, supported HDF-EOS grids, regular bound attributes,
+  and NASA OB.DAAC integerized-sinusoidal Level-3 bins.
+- Official ORNL TESViS subsets when the exact product is advertised and uses the
+  adapter's supported sinusoidal projection. The current ORNL product list does
+  **not** advertise MOD13A2 or MOD13C1; MOD13Q1 is a different product.
+
+A matching extension is only a format hint, not a guarantee that every NASA
+science layout is supported. Unsupported projection, dimensions or science
+variables are diagnosed without fabricating data. Authentication, DAAC EULAs,
+service outages and transfer bandwidth still affect completion.
+
+## Queue, cache and provenance
+
+The app resolves the exact CMR date/geometry selection, deduplicates granules,
+checks normalized caches, then starts bounded direct download/conversion jobs.
+Supabase staging is retained for temporary transfer recovery. A cache miss is
+normal on a first run or after a parser schema change. It does not mean an error.
+No universal zero-wait or fixed-minute guarantee is possible for large archives.
+
+The manifest records source identifiers and URLs, route, format, bytes,
+coordinate backend, conversion status, row count, timing and errors. ORNL
+coverage is date-level subset coverage, not proof that each original CMR tile
+was downloaded. CSV rows retain ORNL filenames and source provenance.
+
+NASA satellite CSV, OpenAQ CSV and each alternative provider CSV remain
+separate. No synthetic observations or metadata-only rows are exported as data.
+
+## Validation and deployment
+
+```sh
+npm ci
+npm test
+pip install -r backend/requirements.txt httpx
+python -m unittest discover -s tests -p 'test_*.py' -v
+bash scripts/validate.sh
+```
+
+Tests include real synthetic HDF4 and HDF5 binary fixtures with expected native
+coordinates, scale factors, fill values, compound records and empty subsets;
+ORNL envelopes/partial failures; CMR pagination; auth queue blocking; and asset
+version synchronization. These fixtures validate parser behavior but do not
+replace an authenticated test of every NASA collection.
+
+GitHub Actions runs the regression suite and static checks for pull requests
+and main pushes. Main deploys only the browser assets to Pages. The native
+converter is a separate runtime and is not deployed by Pages.
+
+## NASA reference implementation
+
+Reviewed [NASA Earthdata Download](https://github.com/nasa/earthdata-download),
+including its queue scheduler, download verification, authentication/EULA states,
+and integration documentation. Its Electron app downloads original files with
+bounded concurrency and persistent state; it is not a universal CSV converter.
+The browser app follows the bounded-queue and auth-blocking approach; it does
+not claim feature parity with the desktop downloader's resumable transfers.
+
+Other implementation references:
+
+- [ORNL REST API](https://modis.ornl.gov/data/modis_webservice.html)
+- [ORNL live product list](https://modis.ornl.gov/rst/api/v1/products)
+- [NASA Level-3 binned format](https://oceancolor.gsfc.nasa.gov/files/resources/docs/technical/ocean_level-3_binned_data_products.pdf)
+- [h5wasm](https://github.com/usnistgov/h5wasm)
