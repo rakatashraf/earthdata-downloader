@@ -80,3 +80,27 @@ test('Authentication failure blocks the rest of its collection, not other collec
  await c.convertAll();const counts=vm.runInContext('({calls:attempted.length,blocked:S.granules.filter(g=>g.conversionStatus===\"auth_blocked\").length,other:S.granules.at(-1).conversionStatus})',c);
  assert.ok(counts.calls<=6);assert.equal(counts.blocked,20);assert.equal(counts.other,'ok');
 });
+
+
+test('Structural conversion failure blocks the collection after one preflight granule',async()=>{
+ const c=app();c.navigator={hardwareConcurrency:4,deviceMemory:4};
+ vm.runInContext(`S.granules=Array.from({length:30},(_,i)=>({title:'bad'+i,collectionId:'C1',collectionShortName:'STRUCT'})).concat([{title:'good',collectionId:'C2',collectionShortName:'GOOD'}]);S.search={component:'ndvi',geometry:{type:'bbox',values:[90,23,91,24]}};
+ hydrateGranuleCache=async items=>({hits:0,local:0,shared:0,rows:0,misses:items});saveGranuleCache=()=>{};
+ var attempted=[];convertDirectGranule=async g=>{attempted.push(g.title);if(g.collectionId==='C1')throw new Error('HDF5 conversion found the requested science data but could not derive in-area coordinates from explicit geolocation arrays or HDF-EOS/grid bounds metadata.');return{rows:[],sourceRows:0}};`,c);
+ await c.convertAll();
+ const counts=vm.runInContext('({calls:attempted.length,skipped:S.granules.filter(g=>g.collectionId===\"C1\"&&g.conversionStatus===\"skipped_unsupported\").length,good:S.granules.at(-1).conversionStatus})',c);
+ assert.ok(counts.calls<=3);assert.equal(counts.skipped,30);assert.equal(counts.good,'ok');
+});
+
+test('Large direct collections are guarded after official subset routes are exhausted',()=>{
+ const c=app(),items=Array.from({length:241},()=>({sizeBytes:1}));
+ assert.equal(c.directCollectionTooLarge(items),true);
+ assert.equal(c.directCollectionTooLarge(items.slice(0,240)),false);
+});
+
+test('Structural error classifier is distinct from transient and auth failures',()=>{
+ const c=app();
+ assert.equal(c.classifyConversionError(new Error('could not derive in-area coordinates from HDF-EOS/grid bounds metadata')),'structural');
+ assert.equal(c.classifyConversionError(new Error('NASA download HTTP 401')),'auth');
+ assert.equal(c.classifyConversionError(new Error('network timeout')),'transient');
+});

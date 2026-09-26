@@ -220,17 +220,17 @@ grep -q "maxResults" app.js
 
 
 
-grep -q "NASA_DIRECT_HOST_MODE" app.js
+! grep -q "NASA_DIRECT_HOST_MODE" app.js
 
-grep -q "directNasaFetch" app.js
+! grep -q "directNasaFetch" app.js
 
-grep -q "setTimeout(()=>ctrl.abort(),900)" app.js
+! grep -q "setTimeout(()=>ctrl.abort(),900)" app.js
 
 grep -q "download_route" app.js
 
 grep -q "Array.from({length:pages-1}" app.js
 
-! grep -q "tryHarmonyFastCollection(cc,gs)" app.js
+grep -q "tryHarmonyFastCollection(cc,gs)" app.js
 
 grep -q "setTimeout(()=>fetchAlternatives" app.js
 
@@ -267,7 +267,10 @@ grep -q "Checking completed-request cache" app.js
 grep -q "Instant cache hit" app.js
 
 grep -q "EDD_DOWNLOAD_CONCURRENCY=5" app.js
-grep -q "granule-worker.js?v=20260926-1600" app.js
+grep -q "MAX_DIRECT_GRANULES_PER_COLLECTION" app.js
+grep -q "STRUCTURAL_RE" app.js
+grep -q "collection-preflight-block" app.js
+grep -q "granule-worker.js?v=20260926-1535" app.js
 grep -q "loadTesvisProducts" app.js
 grep -q "fetchTesvisCollection" app.js
 grep -q "Raw HDF4 only" app.js
@@ -276,7 +279,7 @@ grep -q "modis.ornl.gov" supabase/functions/alternative-proxy/index.ts
 grep -q "function h5L3Binned" granule-worker.js
 grep -q "NASA Level-3 integerized-sinusoidal bins" granule-worker.js
 grep -q "No completed cache. Resolving exact CMR granules" app.js
-grep -q "native granule(s) remain after official subset routing" app.js
+grep -q "bounded native granule(s) remain after official server-side routing" app.js
 grep -q "Ready in " app.js
 ! grep -q "No public COG mirror collection found" app.js
 echo "Static product validation passed."

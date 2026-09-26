@@ -145,14 +145,146 @@ async function catalogDiscover(){const key=normComponent(S.search.component),cac
 ];await Promise.allSettled(jobs);_catalogDiscoveryCache.set(key,found);return found}
 async function addCatalogDiscoveries(){try{const found=await catalogDiscover(),dataGov=found.filter(d=>d.catalog==='Data.gov'&&d.meta&&Array.isArray(d.meta.resources)),limit=Math.min(20,dataGov.length),verified=[];await runReliablePool(dataGov.slice(0,limit),4,async d=>{const hit=await materializeDiscoveredDataset(d);if(hit&&hit.rows.length){S.altRows.push(...hit.rows);altProvider(hit.provider,'ok',hit.rows.length,'Dynamically discovered, fetched and normalized to CSV-ready rows.',hit.url,d.meta);verified.push(hit);metrics()}return hit});return{discovered:found.length,verified}}catch(e){return{discovered:0,verified:[],error:e.message}}}
 async function fetchAlternatives(){if(!S.search)return;S.altRows=[];S.altProviders=[];renderAlternativeProviders();status(E.altStatus,'Finding alternative sources that can return real data and be exported as CSV…');const providers=[['Open-Meteo Air Quality',fetchOpenMeteoAir],['Open-Meteo Historical Weather',fetchOpenMeteoWeather],['NASA POWER',fetchNasaPower],['WorldPop',fetchWorldPop]],direct=providers.map(async([name,fn])=>{try{const rows=await fn();if(!rows.length)return[];S.altRows.push(...rows);altProvider(name,'ok',rows.length,'Verified data source. CSV ready.');metrics();return rows}catch(e){return[]}}),discoveryPromise=addCatalogDiscoveries();const settled=await Promise.allSettled(direct.concat([discoveryPromise])),discovery=settled[settled.length-1]&&settled[settled.length-1].status==='fulfilled'?settled[settled.length-1].value:{discovered:0,verified:[]},ok=S.altProviders.filter(x=>x.status==='ok'&&x.rows>0).length;renderAlternativeProviders();status(E.altStatus,ok?('CSV-ready alternatives: '+ok+' source(s), '+S.altRows.length.toLocaleString()+' normalized row(s). '+Number(discovery&&discovery.discovered||0)+' catalog candidate(s) were checked; only sources with usable data are shown.'):'No alternative source returned usable CSV-ready data for this component/date/area.',ok?'ok':'warn');E.downloadCsvBtn.disabled=!S.rows.length}
-async function fetchSelected(){if(S.busy)return;const sel=S.collections.filter(c=>S.selected.has(c.id)&&(!c.csvProfile||c.csvProfile.ready));if(!sel.length)return;S.busy=true;E.searchBtn.disabled=true;const overallStarted=performance.now(),queryKey=requestCacheKey(sel);E.fetchBtn.disabled=true;E.downloadsCard.classList.remove('hidden');E.conversionLog.innerHTML='';S.granules=[];S.rows=[];S.altRows=[];S.manifest=[];metrics();try{status(E.fetchStatus,'Checking completed-request cache…','ok');const whole=await loadRequestCache(queryKey);if(whole){S.rows=whole.payload.rows;S.manifest=whole.payload.manifest;S.granules=S.manifest.map(m=>({conceptId:m.concept_id||'',nativeId:m.native_id||'',title:m.granule||'',collectionShortName:m.collection||'',collectionTitle:m.collection_title||'',start:m.start_timestamp,end:m.end_timestamp,conversionStatus:'ok',conversionBackend:'request-cache',cacheHit:whole.source}));E.downloadManifestBtn.disabled=!S.manifest.length;E.downloadCsvBtn.disabled=!S.rows.length;metrics();const ms=Math.round(performance.now()-overallStarted);status(E.fetchStatus,'Instant cache hit: '+S.granules.length.toLocaleString()+' granules · '+S.rows.length.toLocaleString()+' rows restored in '+ms+' ms. NASA was not contacted.','ok');log('Whole-request '+whole.source+' cache hit. NASA/CMR download pipeline skipped.','ok');setTimeout(()=>fetchAlternatives().catch(()=>{}),0);return}status(E.fetchStatus,'No completed cache. Resolving exact CMR granules…','ok');const resolved=await mapLimit(sel,Math.min(8,sel.length),async cc=>{const gs=await granules(cc,S.search,false,false),cy=cycle(gs,cc);gs.forEach(g=>{g.dataCycle=cy;g.collectionTitle=cc.title});if(!gs.length)return{cc,gs,rows:[]};if(cc.csvProfile&&cc.csvProfile.route==='tesvis'){status(E.fetchStatus,cc.shortName+': using official ORNL DAAC subset route instead of raw HDF download…','ok');let rows;try{rows=await fetchTesvisCollection(cc,gs)}catch(e){for(const g of gs){g.conversionStatus='failed';g.conversionError=e.message;g.routeFailed=true}log(cc.shortName+': '+e.message,'error');return{cc,gs,rows:[]}}for(const g of gs){if(!rows.coveredDates.has(String(g.start||'').slice(0,10))){g.conversionStatus='failed';g.conversionError='ORNL did not return requested date '+String(g.start||'').slice(0,10);g.routeFailed=true;continue}g.conversionStatus='ok';g.conversionBackend='ornl-tesvis';g.sourceFormat='official-subset-json';g.conversionRows=0;g.sourceRows=0;g.conversionError='';g.downloadRoute='official-ornl-subset'}log(cc.shortName+': '+gs.length+' CMR granules checked against ORNL subset date coverage · '+rows.length.toLocaleString()+' CSV rows.','ok');return{cc,gs,rows}}log(cc.shortName+': '+gs.length+' exact downloadable granule(s) queued in NASA Earthdata Download-style mode.','ok');return{cc,gs,rows:[]}});const routeErrors=resolved.filter(x=>x&&x.error);if(routeErrors.length)throw new Error(routeErrors.map(x=>x.error&&x.error.message||String(x.error)).join(' | '));for(const item of resolved){if(!item||!Array.isArray(item.gs))continue;S.granules.push(...item.gs);if(Array.isArray(item.rows)&&item.rows.length)appendRows(S.rows,item.rows)}const dedup=new Map();for(const g of S.granules){const key=(g.collectionId||'')+'|'+(g.sourceFilename||g.conceptId||g.nativeId||g.granuleUr||g.url);if(!dedup.has(key))dedup.set(key,g)}S.granules=Array.from(dedup.values()).sort((a,b)=>Date.parse(a.start||0)-Date.parse(b.start||0));metrics();if(!S.granules.length){status(E.fetchStatus,'No downloadable NASA granules intersect the exact requested date range and area.','warn');return}const pending=S.granules.filter(g=>g.conversionStatus!=='ok'&&!g.routeFailed);if(pending.length){status(E.fetchStatus,pending.length+' native granule(s) remain after official subset routing. Checking converted cache…','ok');await convertAll()}else status(E.fetchStatus,'Subset routing finished. Preparing coverage manifest…','ok');const elapsed=Math.round(performance.now()-overallStarted);S.manifest=S.granules.map(g=>({collection:g.collectionShortName,collection_title:g.collectionTitle,concept_id:g.conceptId||'',native_id:g.nativeId||'',granule:g.title,start_timestamp:g.start,end_timestamp:g.end,satellite:g.platform,data_cycle:g.dataCycle,source_url:g.url||'',download_source_url:g.downloadSourceUrl||'',download_route:g.downloadRoute||'',cache_hit:g.cacheHit||'',cache_key:g.cacheKey||'',source_url_candidates:(g.sourceUrls||[]).length,source_format:g.sourceFormat||'unknown',compression_wrapper:g.compressionWrapper||'',archive_entry:g.archiveEntry||'',downloaded_bytes:g.downloadBytes||0,unwrapped_bytes:g.unwrappedBytes||0,direct_decode_ms:g.decodeMs||0,recovered_from_supabase:!!g.recoveredFromStaging,conversion_status:g.conversionStatus||'not_attempted',conversion_backend:g.conversionBackend||'native-browser',coordinate_backend:g.coordinateBackend||'',conversion_attempts:g.conversionAttempts||0,conversion_duration_ms:g.conversionDurationMs||0,source_rows:g.sourceRows||0,in_area_rows:g.conversionRows||0,error:g.conversionError||''}));E.downloadManifestBtn.disabled=!S.manifest.length;E.downloadCsvBtn.disabled=!S.rows.length;const succeeded=S.granules.filter(g=>g.conversionStatus==='ok').length,unresolved=S.granules.length-succeeded;await Promise.allSettled(S.cacheWrites);if(!unresolved){await saveRequestCache(queryKey);log('Completed request cached. Future identical requests skip NASA transfer and conversion.','ok')}status(E.fetchStatus,'Ready in '+(elapsed/1000).toFixed(1)+'s: '+succeeded+'/'+S.granules.length+' granule dates satisfied · '+S.rows.length.toLocaleString()+' CSV rows · '+unresolved+' unresolved.',unresolved?'warn':'ok');setTimeout(()=>fetchAlternatives().catch(()=>{}),0)}catch(e){status(E.fetchStatus,'Extraction stopped before unsafe conversion: '+e.message,'error');log(e.stack||e.message,'error')}finally{S.busy=false;E.searchBtn.disabled=!S.verified;E.fetchBtn.disabled=S.selected.size===0}}
+async function fetchSelected(){
+ if(S.busy)return;
+ const sel=S.collections.filter(c=>S.selected.has(c.id)&&(!c.csvProfile||c.csvProfile.ready));
+ if(!sel.length)return;
+ S.busy=true;E.searchBtn.disabled=true;
+ const overallStarted=performance.now(),queryKey=requestCacheKey(sel);
+ E.fetchBtn.disabled=true;E.downloadsCard.classList.remove('hidden');E.conversionLog.innerHTML='';S.granules=[];S.rows=[];S.altRows=[];S.manifest=[];metrics();
+ try{
+  status(E.fetchStatus,'Checking completed-request cache…','ok');
+  const whole=await loadRequestCache(queryKey);
+  if(whole){
+   S.rows=whole.payload.rows;S.manifest=whole.payload.manifest;
+   S.granules=S.manifest.map(m=>({conceptId:m.concept_id||'',nativeId:m.native_id||'',title:m.granule||'',collectionShortName:m.collection||'',collectionTitle:m.collection_title||'',start:m.start_timestamp,end:m.end_timestamp,conversionStatus:'ok',conversionBackend:'request-cache',cacheHit:whole.source}));
+   E.downloadManifestBtn.disabled=!S.manifest.length;E.downloadCsvBtn.disabled=!S.rows.length;metrics();
+   const ms=Math.round(performance.now()-overallStarted);
+   status(E.fetchStatus,'Instant cache hit: '+S.granules.length.toLocaleString()+' granules · '+S.rows.length.toLocaleString()+' rows restored in '+ms+' ms. NASA was not contacted.','ok');
+   log('Whole-request '+whole.source+' cache hit. NASA/CMR download pipeline skipped.','ok');
+   setTimeout(()=>fetchAlternatives().catch(()=>{}),0);return;
+  }
+
+  assertEarthdataToken();
+  status(E.fetchStatus,'No completed cache. Resolving exact CMR granules…','ok');
+  const resolved=await mapLimit(sel,Math.min(6,sel.length),async cc=>{
+   const gs=await granules(cc,S.search,false,false),cy=cycle(gs,cc);
+   gs.forEach(g=>{g.dataCycle=cy;g.collectionTitle=cc.title});
+   if(!gs.length)return{cc,gs,rows:[]};
+
+   if(cc.csvProfile&&cc.csvProfile.route==='tesvis'){
+    status(E.fetchStatus,cc.shortName+': using official ORNL DAAC subset route instead of raw HDF download…','ok');
+    let rows;
+    try{rows=await fetchTesvisCollection(cc,gs)}
+    catch(e){
+     for(const g of gs){g.conversionStatus='skipped_unsupported';g.conversionError=e.message;g.routeFailed=true;g.downloadRoute='ornl-subset-failed'}
+     log(cc.shortName+': ORNL subset route failed cleanly; raw HDF fallback is blocked for this legacy product. '+e.message,'warn');
+     return{cc,gs,rows:[]};
+    }
+    for(const g of gs){
+     if(!rows.coveredDates.has(String(g.start||'').slice(0,10))){g.conversionStatus='skipped_unsupported';g.conversionError='ORNL did not return requested date '+String(g.start||'').slice(0,10);g.routeFailed=true;continue}
+     g.conversionStatus='ok';g.conversionBackend='ornl-tesvis';g.sourceFormat='official-subset-json';g.conversionRows=0;g.sourceRows=0;g.conversionError='';g.downloadRoute='official-ornl-subset';
+    }
+    log(cc.shortName+': '+gs.length+' CMR granules satisfied through ORNL subset coverage · '+rows.length.toLocaleString()+' CSV rows.','ok');
+    return{cc,gs,rows};
+   }
+
+   const fast=await tryHarmonyFastCollection(cc,gs);
+   if(fast){
+    for(const g of gs){g.conversionStatus='ok';g.conversionBackend='harmony-fast-collection';g.sourceFormat=fast.format||'harmony-output';g.conversionRows=0;g.sourceRows=0;g.conversionError='';g.downloadRoute='official-harmony-subset'}
+    log(cc.shortName+': Harmony replaced '+gs.length.toLocaleString()+' raw granule downloads with '+fast.links.length.toLocaleString()+' server-side subset output(s) · '+fast.rows.length.toLocaleString()+' CSV rows.','ok');
+    return{cc,gs,rows:fast.rows};
+   }
+
+   if(directCollectionTooLarge(gs)){
+    const bytes=gs.reduce((n,g)=>n+(Number(g.sizeBytes)||0),0),reason='Bulk raw fallback blocked after server-side subset routes were unavailable ('+gs.length.toLocaleString()+' granules'+(bytes?' · '+(bytes/1073741824).toFixed(2)+' GB reported':'')+'). This prevents hours of repeated browser downloads.';
+    for(const g of gs){g.conversionStatus='skipped_bulk';g.conversionError=reason;g.routeFailed=true;g.downloadRoute='bulk-download-guard'}
+    log(cc.shortName+': '+reason,'warn');
+    return{cc,gs,rows:[]};
+   }
+
+   log(cc.shortName+': '+gs.length+' exact downloadable granule(s) queued in bounded NASA Earthdata Download-style mode.','ok');
+   return{cc,gs,rows:[]};
+  });
+
+  const routeErrors=resolved.filter(x=>x&&x.error);
+  if(routeErrors.length)throw new Error(routeErrors.map(x=>x.error&&x.error.message||String(x.error)).join(' | '));
+  for(const item of resolved){if(!item||!Array.isArray(item.gs))continue;S.granules.push(...item.gs);if(Array.isArray(item.rows)&&item.rows.length)appendRows(S.rows,item.rows)}
+  const dedup=new Map();
+  for(const g of S.granules){const key=(g.collectionId||'')+'|'+(g.sourceFilename||g.conceptId||g.nativeId||g.granuleUr||g.url);if(!dedup.has(key))dedup.set(key,g)}
+  S.granules=Array.from(dedup.values()).sort((a,b)=>Date.parse(a.start||0)-Date.parse(b.start||0));metrics();
+  if(!S.granules.length){status(E.fetchStatus,'No downloadable NASA granules intersect the exact requested date range and area.','warn');return}
+
+  const pending=S.granules.filter(g=>g.conversionStatus!=='ok'&&!g.routeFailed);
+  if(pending.length){status(E.fetchStatus,pending.length+' bounded native granule(s) remain after official server-side routing. Checking converted cache…','ok');await convertAll()}
+  else status(E.fetchStatus,'Server-side routing / safety checks finished. Preparing coverage manifest…','ok');
+
+  const elapsed=Math.round(performance.now()-overallStarted);
+  S.manifest=S.granules.map(g=>({collection:g.collectionShortName,collection_title:g.collectionTitle,concept_id:g.conceptId||'',native_id:g.nativeId||'',granule:g.title,start_timestamp:g.start,end_timestamp:g.end,satellite:g.platform,data_cycle:g.dataCycle,source_url:g.url||'',download_source_url:g.downloadSourceUrl||'',download_route:g.downloadRoute||'',cache_hit:g.cacheHit||'',cache_key:g.cacheKey||'',source_url_candidates:(g.sourceUrls||[]).length,source_format:g.sourceFormat||'unknown',compression_wrapper:g.compressionWrapper||'',archive_entry:g.archiveEntry||'',downloaded_bytes:g.downloadBytes||0,unwrapped_bytes:g.unwrappedBytes||0,direct_decode_ms:g.decodeMs||0,recovered_from_supabase:!!g.recoveredFromStaging,conversion_status:g.conversionStatus||'not_attempted',conversion_backend:g.conversionBackend||'native-browser',coordinate_backend:g.coordinateBackend||'',conversion_attempts:g.conversionAttempts||0,conversion_duration_ms:g.conversionDurationMs||0,source_rows:g.sourceRows||0,in_area_rows:g.conversionRows||0,error:g.conversionError||''}));
+  E.downloadManifestBtn.disabled=!S.manifest.length;E.downloadCsvBtn.disabled=!S.rows.length;
+  const succeeded=S.granules.filter(g=>g.conversionStatus==='ok').length,failed=S.granules.filter(g=>g.conversionStatus==='failed').length,auth=S.granules.filter(g=>g.conversionStatus==='auth_blocked').length,skipped=S.granules.filter(g=>g.conversionStatus==='skipped_bulk'||g.conversionStatus==='skipped_unsupported').length,unresolved=S.granules.length-succeeded;
+  await Promise.allSettled(S.cacheWrites);
+  if(!unresolved){await saveRequestCache(queryKey);log('Completed request cached. Future identical requests skip NASA transfer and conversion.','ok')}
+  status(E.fetchStatus,'Ready in '+(elapsed/1000).toFixed(1)+'s: '+succeeded+'/'+S.granules.length+' granule dates satisfied · '+S.rows.length.toLocaleString()+' CSV rows · '+failed+' failed · '+skipped+' safely skipped · '+auth+' auth-blocked.',failed||skipped||auth?'warn':'ok');
+  setTimeout(()=>fetchAlternatives().catch(()=>{}),0);
+ }catch(e){status(E.fetchStatus,'Extraction stopped safely: '+e.message,'error');log(e.stack||e.message,'error')}
+ finally{S.busy=false;E.searchBtn.disabled=!S.verified;E.fetchBtn.disabled=S.selected.size===0}
+}
 function metrics(){const staged=S.granules.filter(g=>g.stageStatus==='staged').length,cacheHits=S.granules.filter(g=>g.cacheHit&&g.cacheHit!=='miss').length,a=[['Collections',S.selected.size],['Granules',S.granules.length],['Cache hits',cacheHits],['Staged now',staged],['Satellite rows',S.rows.length.toLocaleString()],['Alternative rows',S.altRows.length.toLocaleString()],['Ground rows',S.ground.length.toLocaleString()]];E.metrics.innerHTML=a.map(x=>'<div class="metric"><strong>'+x[1]+'</strong><span>'+x[0]+'</span></div>').join('')}
 function fileNameFromDisposition(cd){const s=String(cd||'');let m=s.match(/filename\*=UTF-8''([^;]+)/i);if(m){try{return decodeURIComponent(m[1].replace(/^["']|["']$/g,''))}catch(e){return m[1]}}m=s.match(/filename\s*=\s*"?([^";]+)"?/i);return m?m[1].trim():''}
 function pathHint(url){try{return decodeURIComponent(new URL(url).pathname).toLowerCase()}catch(e){return String(url||'').toLowerCase()}}
 function kind(url,ct,disposition,finalUrl){const p=[pathHint(url),pathHint(finalUrl),String(fileNameFromDisposition(disposition)||'').toLowerCase()].join(' '),s=p+' '+String(ct||'').toLowerCase();if(/text\/csv|application\/csv|comma-separated/.test(s)||/\.csv(?:\s|$|[?#])/.test(p))return'csv';if(/geojson|application\/json/.test(s)||/\.(?:geo)?json(?:\s|$|[?#])/.test(p))return'json';if(/geotiff|image\/tiff/.test(s)||/\.tiff?(?:\s|$|[?#])/.test(p))return'geotiff';if(/netcdf/.test(s)||/\.(?:nc|nc4|cdf)(?:\s|$|[?#])/.test(p))return'netcdf';if(/hdf/.test(s)||/\.(?:hdf|h4|h5|hdf5|he5)(?:\s|$|[?#])/.test(p))return'hdf';if(/gzip|x-gzip/.test(s)||/\.gz(?:\s|$|[?#])/.test(p))return'gzip';if(/application\/zip|x-zip/.test(s)||/\.zip(?:\s|$|[?#])/.test(p))return'zip';return'binary'}
-const NASA_DIRECT_HOST_MODE=new Map();
-async function directNasaFetch(sourceUrl){let host='';try{host=new URL(sourceUrl).hostname.toLowerCase()}catch(e){}if(host&&NASA_DIRECT_HOST_MODE.get(host)===false)return null;const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),900);try{const r=await fetch(sourceUrl,{headers:{'Authorization':'Bearer '+S.token},redirect:'follow',credentials:'omit',signal:AbortSignal.any([ctrl.signal,AbortSignal.timeout(180000)]),cache:'no-store'});clearTimeout(timer);if(r.ok&&!String(r.headers.get('content-type')||'').toLowerCase().includes('text/html')){if(host)NASA_DIRECT_HOST_MODE.set(host,true);return r}if(host&&[0,401,403,404].includes(Number(r.status)))NASA_DIRECT_HOST_MODE.set(host,false);return null}catch(e){clearTimeout(timer);if(host)NASA_DIRECT_HOST_MODE.set(host,false);return null}}
-async function downloadGranule(g){if(!S.token)throw new Error('Earthdata token is missing. Verify access again.');const urls=(Array.isArray(g.sourceUrls)&&g.sourceUrls.length?g.sourceUrls:[g.url]).filter(Boolean);if(!urls.length)throw new Error('No downloadable URL found in CMR metadata.');let last;for(let attempt=0;attempt<Math.min(6,Math.max(3,urls.length*2));attempt++){const sourceUrl=urls[attempt%urls.length];const direct=await directNasaFetch(sourceUrl);if(direct){g.downloadSourceUrl=sourceUrl;g.downloadFinalUrl=direct.url||sourceUrl;g.downloadDisposition=direct.headers.get('content-disposition')||'';g.downloadContentType=(direct.headers.get('content-type')||'').toLowerCase();g.downloadRoute='direct';return direct}const u=NASA_PROXY_BASE+'?url='+encodeURIComponent(sourceUrl);let r;try{r=await fetch(u,{headers:{'X-Earthdata-Token':S.token},cache:'no-store',signal:AbortSignal.timeout(180000)})}catch(e){last=new Error('NASA proxy network failure: '+(e&&e.message?e.message:String(e)));if(attempt+1<Math.min(6,Math.max(3,urls.length*2))){await sleep(150*(attempt+1));continue}throw last}if(r.ok){const ct=(r.headers.get('content-type')||'').toLowerCase();if(ct.includes('text/html')){last=new Error('NASA returned an HTML login/error page instead of the granule. Re-verify the Earthdata token and authorize the relevant DAAC application.');continue}g.downloadSourceUrl=sourceUrl;g.downloadFinalUrl=r.headers.get('x-final-url')||sourceUrl;g.downloadDisposition=r.headers.get('content-disposition')||'';g.downloadContentType=ct;g.downloadRoute='proxy';return r}let detail='';try{const b=await r.clone().json();detail=b.detail||b.error||''}catch(e){detail=await r.text().catch(()=>'')}last=new Error('NASA download HTTP '+r.status+(detail?': '+String(detail).slice(0,260):'')+((r.status===401||r.status===403)?' Check that the token is current and the relevant DAAC application is authorized in Earthdata Login.':''));last.httpStatus=r.status;if((r.status===401||r.status===403)&&urls.length===1)throw last;if((r.status===429||r.status>=500||r.status===401||r.status===403||r.status===404)&&attempt+1<Math.min(6,Math.max(3,urls.length*2))){await sleep(180*(attempt+1));continue}throw last}throw last||new Error('NASA download failed across all CMR endpoints.')}
+function tokenExpiresSoon(token){
+ try{
+  const p=String(token||'').split('.');
+  if(p.length!==3)return false;
+  const raw=p[1].replace(/-/g,'+').replace(/_/g,'/');
+  const json=JSON.parse(atob(raw+'='.repeat((4-raw.length%4)%4)));
+  return Number.isFinite(Number(json.exp))&&Number(json.exp)<=Math.floor(Date.now()/1000)+30;
+ }catch(e){return false}
+}
+function assertEarthdataToken(){
+ if(!S.token)throw new Error('Earthdata token is missing. Verify access again.');
+ if(tokenExpiresSoon(S.token)){verified(false,'Earthdata token expired. Paste a fresh token before downloading.');throw new Error('Earthdata token expired. Verify a fresh token before downloading.')}
+}
+async function downloadGranule(g){
+ assertEarthdataToken();
+ const urls=Array.from(new Set((Array.isArray(g.sourceUrls)&&g.sourceUrls.length?g.sourceUrls:[g.url]).filter(Boolean))).slice(0,4);
+ if(!urls.length)throw new Error('No downloadable URL found in CMR metadata.');
+ let last=null;
+ for(const sourceUrl of urls){
+  for(let pass=0;pass<2;pass++){
+   const u=NASA_PROXY_BASE+'?url='+encodeURIComponent(sourceUrl);
+   let r;
+   try{
+    r=await fetch(u,{headers:{'X-Earthdata-Token':S.token},cache:'no-store',signal:AbortSignal.timeout(120000)});
+   }catch(e){
+    last=new Error('NASA proxy network failure: '+(e&&e.message?e.message:String(e)));
+    if(pass===0){await sleep(500);continue}
+    break;
+   }
+   if(r.ok){
+    const ct=(r.headers.get('content-type')||'').toLowerCase();
+    if(ct.includes('text/html'))throw new Error('NASA returned an HTML login/error page instead of the granule. Re-verify the Earthdata token and authorize the relevant DAAC application.');
+    g.downloadSourceUrl=sourceUrl;
+    g.downloadFinalUrl=r.headers.get('x-final-url')||sourceUrl;
+    g.downloadDisposition=r.headers.get('content-disposition')||'';
+    g.downloadContentType=ct;
+    g.downloadRoute='nasa-proxy';
+    return r;
+   }
+   let detail='';
+   try{const b=await r.clone().json();detail=b.detail||b.error||''}catch(e){detail=await r.text().catch(()=>'')}
+   last=new Error('NASA download HTTP '+r.status+(detail?': '+String(detail).slice(0,260):'')+((r.status===401||r.status===403)?' Check that the token is current and the relevant DAAC application is authorized in Earthdata Login.':''));
+   last.httpStatus=r.status;
+   if(r.status===401||r.status===403)throw last;
+   if(r.status===404)break;
+   if((r.status===429||r.status>=500)&&pass===0){await sleep(700);continue}
+   throw last;
+  }
+ }
+ throw last||new Error('NASA download failed across all CMR endpoints.');
+}
 function haversineMeters(aLat,aLon,bLat,bLon){const R=6371008.8,toRad=x=>x*Math.PI/180,dLat=toRad(bLat-aLat),dLon=toRad(bLon-aLon),p=Math.sin(dLat/2)**2+Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.min(1,Math.sqrt(p)))}
 function pointInPolygon(lon,lat,v){let inside=false;for(let i=0,j=v.length-2;i<v.length;i+=2){const xi=v[i],yi=v[i+1],xj=v[j],yj=v[j+1],cross=((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi||Number.EPSILON)+xi);if(cross)inside=!inside;j=i}return inside}
 function pointToSegmentMeters(lat,lon,aLat,aLon,bLat,bLon){const clat=(aLat+bLat+lat)/3*Math.PI/180,kx=111320*Math.cos(clat),ky=111320,px=lon*kx,py=lat*ky,ax=aLon*kx,ay=aLat*ky,bx=bLon*kx,by=bLat*ky,dx=bx-ax,dy=by-ay,t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy||1)));return Math.hypot(px-(ax+t*dx),py-(ay+t*dy))}
@@ -162,11 +294,12 @@ async function parseMainThreadBuffer(buf,k,g){let rows=[];if(k==='geotiff')rows=
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const RETRYABLE_RE=/network|timeout|timed out|429|502|503|504|fetch|worker error|worker failure|webassembly|wasm|temporar|connection|aborted|reset/i;
 const AUTH_RE=/HTTP (401|403)|login page|token|authorize the relevant DAAC/i;
+const STRUCTURAL_RE=/could not derive in-area coordinates|coordinate discovery failed|science-variable discovery failed|no coordinate-aligned numeric|no safely identifiable coordinate|unsupported binary format|format could not be identified|projected geotiff|geographic geotiff|level-3 .*no science|level-3 .*counts do not match|level-3 .*no valid bin|hdf5 geolocation|no valid component values survived|original hdf4 requires|native hdf4 conversion/i;
 function conversionConcurrency(items){const hc=Math.max(2,Number(navigator.hardwareConcurrency)||4),mem=Number(navigator.deviceMemory)||4,bytes=(items||[]).map(g=>Number(g.stageBytes)||Number(g.sizeBytes)||0),avg=bytes.length?bytes.reduce((a,b)=>a+b,0)/bytes.length:0,hasHdf=(items||[]).some(g=>/hdf/i.test(String(g.sourceFormat||'')));let n;if(hasHdf){n=avg<=12*1024*1024?Math.min(16,hc*2):avg<=48*1024*1024?Math.min(12,hc):Math.min(6,Math.max(2,Math.floor(hc/2)))}else{n=avg<=12*1024*1024?Math.min(32,hc*3):avg<=48*1024*1024?Math.min(20,hc*2):Math.min(10,hc)}if(mem<=4)n=Math.min(n,8);if(mem<=2)n=Math.min(n,4);return Math.max(2,Math.min(n,(items||[]).length||2))}
 function conversionAverageMs(items){const done=(items||[]).filter(g=>g.conversionStatus==='ok'&&Number.isFinite(Number(g.conversionDurationMs)));return done.length?Math.round(done.reduce((n,g)=>n+Number(g.conversionDurationMs),0)/done.length):0}
 class GranuleWorkerPool{
   constructor(size){this.size=size;this.queue=[];this.slots=[];for(let i=0;i<size;i++)this.slots.push(this.spawn(i))}
-  spawn(index){const workerUrl=new URL('./granule-worker.js?v=20260926-1600',document.baseURI),worker=new Worker(workerUrl,{type:'module'}),slot={index,worker,busy:false,job:null};worker.onmessage=e=>{const job=slot.job,d=e.data||{};slot.job=null;slot.busy=false;if(job){if(d.ok)job.resolve({rows:d.rows||[],sourceRows:Number(d.sourceRows)||0,coordinateBackend:d.coordinateBackend||''});else job.reject(new Error(d.error||'Granule worker failed.'))}this.pump()};worker.onerror=e=>{const job=slot.job;try{worker.terminate()}catch(x){}const fresh=this.spawn(index);this.slots[index]=fresh;if(job)job.reject(new Error('Granule worker error: '+(e.message||'unknown worker failure')));this.pump()};return slot}
+  spawn(index){const workerUrl=new URL('./granule-worker.js?v=20260926-1535',document.baseURI),worker=new Worker(workerUrl,{type:'module'}),slot={index,worker,busy:false,job:null};worker.onmessage=e=>{const job=slot.job,d=e.data||{};slot.job=null;slot.busy=false;if(job){if(d.ok)job.resolve({rows:d.rows||[],sourceRows:Number(d.sourceRows)||0,coordinateBackend:d.coordinateBackend||''});else job.reject(new Error(d.error||'Granule worker failed.'))}this.pump()};worker.onerror=e=>{const job=slot.job;try{worker.terminate()}catch(x){}const fresh=this.spawn(index);this.slots[index]=fresh;if(job)job.reject(new Error('Granule worker error: '+(e.message||'unknown worker failure')));this.pump()};return slot}
   run(payload,buffer){return new Promise((resolve,reject)=>{this.queue.push({payload,buffer,resolve,reject});this.pump()})}
   pump(){for(const slot of this.slots){if(slot.busy||!this.queue.length)continue;const job=this.queue.shift();slot.busy=true;slot.job=job;try{slot.worker.postMessage(Object.assign({},job.payload,{buffer:job.buffer}),[job.buffer])}catch(e){slot.job=null;slot.busy=false;job.reject(e)}}}
   close(){for(const slot of this.slots)try{slot.worker.terminate()}catch(e){}this.queue.length=0}
@@ -178,7 +311,7 @@ async function parseGranuleWorker(pool,buf,k,g,componentOverride){
  if(result.coordinateBackend)g.coordinateBackend=result.coordinateBackend;
  return result;
 }
-function classifyConversionError(e){const msg=String(e&&e.message?e.message:e);if(AUTH_RE.test(msg))return'auth';if(RETRYABLE_RE.test(msg))return'transient';return'permanent'}
+function classifyConversionError(e){const msg=String(e&&e.message?e.message:e);if(AUTH_RE.test(msg))return'auth';if(STRUCTURAL_RE.test(msg))return'structural';if(RETRYABLE_RE.test(msg))return'transient';return'permanent'}
 const STAGING_BATCH_MAX=24;
 const STAGING_TARGET_BYTES=700*1024*1024;
 const STAGING_CONCURRENCY=12;
@@ -216,6 +349,9 @@ async function harmonySubmitAndWait(url,budgetMs){const started=performance.now(
 async function convertHarmonyOutput(link,c,pool,index){const g={id:'harmony:'+index,title:link.title||('Harmony subset '+(index+1)),start:isoStart(S.search.start),end:isoEnd(S.search.end),collectionId:c.id,collectionTitle:c.title,collectionShortName:c.shortName,platform:(c.platforms&&c.platforms[0])||'NASA',url:link.href,sourceUrls:[link.href],dataCycle:'subset-output',sourceLabel:'NASA Earthdata / Harmony',provenanceUrl:link.href,conversionBackend:'harmony-fast-collection'};const result=await convertDirectGranule(g,pool);return{g,result}}
 async function tryHarmonyFastCollection(c,gs){const totalBytes=gs.reduce((n,g)=>n+(Number(g.sizeBytes)||0),0);if(gs.length<8&&totalBytes<96*1024*1024){log(c.shortName+': small exact collection; direct mode is faster than launching Harmony.','ok');return null}let cap;try{cap=await harmonyCapabilities(c)}catch(e){log(c.shortName+': Harmony capabilities unavailable; using direct granules. '+e.message,'warn');return null}if(!harmonyFastEligible(cap)){log(c.shortName+': no compatible Harmony bbox fast path; using direct granules.','warn');return null}const fmt=harmonyFormat(cap),variable=cap.variableSubset?harmonyVariable(cap):'';log(c.shortName+': FAST COLLECTION MODE · '+gs.length+' exact granules · bbox subset'+(variable?' · variable '+variable:'')+(cap.concatenate?' · concatenate':'')+(fmt?' · '+fmt:''),'ok');status(E.fetchStatus,c.shortName+': NASA server-side reduction running. 60-second collection target…','ok');let job;try{job=await harmonySubmitAndWait(harmonyRequestUrl(c,gs,cap,true),HARMONY_FAST_BUDGET_MS)}catch(e){if(cap.concatenate){try{job=await harmonySubmitAndWait(harmonyRequestUrl(c,gs,cap,false),8000)}catch(e2){log(c.shortName+': Harmony fast mode did not finish inside budget; falling back to parallel exact-granule mode. '+e2.message,'warn');return null}}else{log(c.shortName+': Harmony fast mode did not finish inside budget; falling back to parallel exact-granule mode. '+e.message,'warn');return null}}const links=harmonyDataLinks(job);if(!links.length){log(c.shortName+': Harmony completed but returned no data links; using direct granules.','warn');return null}const pool=typeof Worker!=='undefined'?new GranuleWorkerPool(Math.min(12,Math.max(2,Number(navigator.hardwareConcurrency)||4),links.length)):null;try{const converted=await Promise.all(links.map((l,i)=>convertHarmonyOutput(l,c,pool,i))),rows=[];for(const x of converted)rows.push(...(x.result.rows||[]));if(!rows.length)throw new Error('Harmony outputs contained no normalized rows in the requested area.');return{rows,links,job,format:fmt,variable}}catch(e){log(c.shortName+': Harmony output conversion failed; using direct exact granules. '+e.message,'warn');return null}finally{if(pool)pool.close()}}
 const EDD_DOWNLOAD_CONCURRENCY=5;
+const MAX_DIRECT_GRANULES_PER_COLLECTION=240;
+const MAX_DIRECT_BYTES_PER_COLLECTION=2*1024*1024*1024;
+function directCollectionTooLarge(gs){const bytes=(gs||[]).reduce((n,g)=>n+(Number(g.sizeBytes)||0),0);return (gs||[]).length>MAX_DIRECT_GRANULES_PER_COLLECTION||bytes>MAX_DIRECT_BYTES_PER_COLLECTION}
 function directPipelineConcurrency(items){return Math.max(1,Math.min(EDD_DOWNLOAD_CONCURRENCY,(items||[]).length||1))}
 async function convertDirectGranule(g,pool){const r=await downloadGranule(g),ct=r.headers.get('content-type')||g.downloadContentType||'',disposition=r.headers.get('content-disposition')||g.downloadDisposition||'',finalUrl=r.headers.get('x-final-url')||g.downloadFinalUrl||g.downloadSourceUrl||g.url,started=performance.now(),raw=await r.arrayBuffer(),normalized=await normalizeDownloadedBuffer(raw,g,ct,disposition,finalUrl),buf=normalized.buffer,k=normalized.format;g.sourceFormat=k==='hdf4'?'hdf4':k;g.compressionWrapper=normalized.wrapper||'';g.downloadBytes=raw.byteLength;g.unwrappedBytes=buf.byteLength;g.downloadCompletedAt=new Date().toISOString();if(k==='hdf4')return convertNativeHdf4(buf,g);if(!['geotiff','netcdf','csv','json','hdf'].includes(k)){const cd=fileNameFromDisposition(disposition),hint=[ct,cd,finalUrl].filter(Boolean).join(' | ');throw new Error('NASA granule downloaded successfully but its scientific format could not be identified. First bytes='+Array.from(new Uint8Array(raw,0,Math.min(16,raw.byteLength))).map(x=>x.toString(16).padStart(2,'0')).join(' ')+'; headers='+hint.slice(0,500))}const result=await parseGranuleWorker(pool,buf,k,g);g.decodeMs=Math.round(performance.now()-started);return result}
 async function recoverTransientViaStaging(items,pool){if(!items.length)return;const xid=extractionId(),staged=await runReliablePool(items,Math.min(STAGING_CONCURRENCY,items.length),(g,i)=>stageOne(g,xid,i,items.length)),ready=staged.filter(x=>x&&x.ok).map(x=>x.g);if(!ready.length)return;await runReliablePool(ready,Math.min(conversionConcurrency(ready),ready.length),async(g,i)=>{try{const result=await convertAttempt(g,pool),rows=result.rows||[];S.rows.push(...rows);g.conversionStatus='ok';g.conversionRows=rows.length;g.sourceRows=result.sourceRows||0;g.conversionError='';g.recoveredFromStaging=true;return true}catch(e){g.conversionStatus='failed';g.conversionError=String(e&&e.message?e.message:e);return false}finally{await cleanupStage(g,xid)}})}
@@ -241,7 +377,118 @@ async function hydrateGranuleCache(items){for(const g of items)g.cacheKey=granul
 function saveGranuleCache(g,rows,sourceRows){if(!g.cacheKey)g.cacheKey=granuleCacheKey(g);const payload={schema:CACHE_SCHEMA,type:'granule',rows,sourceRows:Number(sourceRows)||rows.length,sourceFormat:g.sourceFormat||'',conversionBackend:g.conversionBackend||'native-browser',savedAt:new Date().toISOString()};const p=cachePut(g.cacheKey,payload,{collection:g.collectionId||g.collectionShortName,granule:g.conceptId||g.nativeId||g.granuleUr||g.title});S.cacheWrites.push(p);if(S.cacheWrites.length>200)S.cacheWrites.splice(0,100)}
 async function loadRequestCache(key){const hit=await cacheGetOne(key),p=hit&&hit.payload;if(!p||p.schema!==CACHE_SCHEMA||p.type!=='query'||!Array.isArray(p.rows)||!Array.isArray(p.manifest))return null;return{payload:p,source:hit.source}}
 async function saveRequestCache(key){const payload={schema:CACHE_SCHEMA,type:'query',rows:S.rows,manifest:S.manifest,savedAt:new Date().toISOString()};const p=cachePut(key,payload,{collection:'QUERY',granule:'query'});S.cacheWrites.push(p);await p}
-async function convertAll(){const pending=S.granules.filter(g=>g.conversionStatus!=='ok'&&!g.routeFailed),originalTotal=pending.length;if(!originalTotal){log('All granules are already satisfied.','ok');return}status(E.fetchStatus,'Checking converted cache before NASA downloads…','ok');const cached=await hydrateGranuleCache(pending),q=cached.misses,total=q.length;if(cached.hits){log('Converted cache: '+cached.hits+'/'+originalTotal+' granules restored ('+cached.local+' local, '+cached.shared+' shared) · '+cached.rows.toLocaleString()+' rows · zero NASA downloads for those granules.','ok');metrics()}if(!total){status(E.fetchStatus,'All '+originalTotal+' granules loaded from converted cache. NASA download skipped.','ok');return}const pipeline=directPipelineConcurrency(q),workers=Math.min(pipeline,conversionConcurrency(q)),blockedCollections=new Map(),progress={active:0,done:cached.hits,ok:cached.hits,failed:0,retrying:0,authBlocked:0},pool=typeof Worker!=='undefined'?new GranuleWorkerPool(workers):null;log('Cache misses: '+total+' granule(s). Starting '+pipeline+' parallel NASA download/convert pipelines · '+workers+' conversion workers.','ok');status(E.fetchStatus,cached.hits+' cache hits · '+total+' NASA downloads remaining…','ok');try{await runReliablePool(q,pipeline,async(g,index)=>{const block=blockedCollections.get(g.collectionId);if(block){g.conversionStatus='auth_blocked';g.conversionError=block;progress.authBlocked++;progress.done++;return false}const started=performance.now();g.conversionStatus='running';g.conversionStartedAt=new Date().toISOString();for(let attempt=1;attempt<=3;attempt++){g.conversionAttempts=attempt;try{const result=await convertDirectGranule(g,pool),rows=result.rows||[];appendRows(S.rows,rows);g.conversionStatus='ok';g.conversionRows=rows.length;g.sourceRows=result.sourceRows||0;g.conversionDurationMs=Math.round(performance.now()-started);g.conversionError='';g.cacheHit='miss';saveGranuleCache(g,rows,g.sourceRows);progress.ok++;progress.done++;status(E.fetchStatus,progress.done+'/'+originalTotal+' satisfied · '+cached.hits+' from cache · '+(progress.done-cached.hits)+' processed · '+progress.failed+' unresolved','ok');return true}catch(e){const cls=classifyConversionError(e),msg=String(e&&e.message?e.message:e);g.conversionError=msg;if(cls==='auth'){blockedCollections.set(g.collectionId,msg);g.conversionStatus='auth_blocked';progress.authBlocked++;progress.done++;return false}if(cls==='permanent'){g.conversionStatus='failed';progress.failed++;progress.done++;log('['+(index+1)+'/'+total+'] '+g.title+': conversion error: '+msg,'error');return false}if(attempt<3){await sleep(300*attempt);continue}g.conversionStatus='failed';progress.failed++;progress.done++;return false}}return false});const transient=q.filter(g=>g.conversionStatus==='failed'&&RETRYABLE_RE.test(String(g.conversionError||'')));if(transient.length){log('Direct path left '+transient.length+' temporary transfer failure(s); using Supabase staging only for those files.','warn');await recoverTransientViaStaging(transient,pool)}}finally{if(pool)pool.close()}const ok=S.granules.filter(g=>g.conversionStatus==='ok').length,auth=S.granules.filter(g=>g.conversionStatus==='auth_blocked').length,failed=S.granules.filter(g=>g.conversionStatus==='failed').length;status(E.fetchStatus,'Finished: '+ok+'/'+S.granules.length+' satisfied · '+cached.hits+' cache hits · '+failed+' failed · '+auth+' auth-blocked',auth||failed?'warn':'ok');log('Cache-aware pipeline complete: '+cached.hits+' reused · '+q.filter(g=>g.conversionStatus==='ok').length+' newly converted · '+failed+' failed.','ok')}
+async function convertAll(){
+ const pending=S.granules.filter(g=>g.conversionStatus!=='ok'&&!g.routeFailed);
+ const originalTotal=pending.length;
+ if(!originalTotal){log('All granules are already satisfied.','ok');return}
+ status(E.fetchStatus,'Checking converted cache before NASA downloads…','ok');
+ const cached=await hydrateGranuleCache(pending),misses=cached.misses;
+ if(cached.hits){log('Converted cache: '+cached.hits+'/'+originalTotal+' granules restored ('+cached.local+' local, '+cached.shared+' shared) · '+cached.rows.toLocaleString()+' rows · zero NASA downloads for those granules.','ok');metrics()}
+ if(!misses.length){status(E.fetchStatus,'All '+originalTotal+' granules loaded from converted cache. NASA download skipped.','ok');return}
+
+ const workers=Math.min(EDD_DOWNLOAD_CONCURRENCY,conversionConcurrency(misses));
+ const pool=typeof Worker!=='undefined'?new GranuleWorkerPool(workers):null;
+ const groups=new Map();
+ for(const g of misses){const k=g.collectionId||g.collectionShortName||'unknown';if(!groups.has(k))groups.set(k,[]);groups.get(k).push(g)}
+ const ready=[];
+ let preflightSatisfied=0,preflightSkipped=0,preflightFailed=0,preflightAuth=0;
+ log('Cache misses: '+misses.length+' granule(s) across '+groups.size+' collection(s). Preflighting one uncached granule per repeated collection before bulk transfer.','ok');
+ status(E.fetchStatus,'Preflight: validating collection structures before bulk NASA downloads…','ok');
+
+ try{
+  await runReliablePool(Array.from(groups.values()),Math.min(3,groups.size||1),async group=>{
+   if(group.length===1){ready.push(group[0]);return}
+   const g=group[0],started=performance.now();
+   g.conversionStatus='preflight';
+   try{
+    const result=await convertDirectGranule(g,pool),rows=result.rows||[];
+    appendRows(S.rows,rows);
+    g.conversionStatus='ok';g.conversionRows=rows.length;g.sourceRows=result.sourceRows||0;g.conversionDurationMs=Math.round(performance.now()-started);g.conversionError='';g.cacheHit='miss';g.conversionBackend=g.conversionBackend||'native-browser';
+    saveGranuleCache(g,rows,g.sourceRows);
+    preflightSatisfied++;
+    ready.push(...group.slice(1));
+    log((g.collectionShortName||g.collectionId||'Collection')+': preflight passed. '+(group.length-1).toLocaleString()+' remaining granule(s) are safe to process.','ok');
+   }catch(e){
+    const cls=classifyConversionError(e),msg=String(e&&e.message?e.message:e);
+    if(cls==='auth'){
+     for(const x of group){x.conversionStatus='auth_blocked';x.conversionError=msg}
+     preflightAuth+=group.length;
+     log((g.collectionShortName||g.collectionId||'Collection')+': authorization failed once; '+group.length.toLocaleString()+' repeated downloads were blocked.','error');
+     return;
+    }
+    if(cls==='structural'){
+     for(const x of group){x.conversionStatus='skipped_unsupported';x.conversionError=msg;x.routeFailed=true;x.downloadRoute=x.downloadRoute||'collection-preflight-block'}
+     preflightSkipped+=group.length;
+     log((g.collectionShortName||g.collectionId||'Collection')+': incompatible structure detected on one preflight granule. Blocked '+group.length.toLocaleString()+' doomed raw downloads. '+msg,'warn');
+     return;
+    }
+    if(cls==='permanent'){
+     g.conversionStatus='failed';g.conversionError=msg;preflightFailed++;
+     ready.push(...group.slice(1));
+     log((g.collectionShortName||g.collectionId||'Collection')+': first granule failed independently; continuing the remaining collection without treating it as a structural failure. '+msg,'warn');
+     return;
+    }
+    g.conversionStatus='pending';g.conversionError=msg;
+    ready.push(...group);
+    log((g.collectionShortName||g.collectionId||'Collection')+': preflight transfer was temporary; regular bounded retry will handle it.','warn');
+   }
+  });
+
+  if(!ready.length){
+   const ok=S.granules.filter(g=>g.conversionStatus==='ok').length;
+   status(E.fetchStatus,'Finished safely: '+ok+'/'+S.granules.length+' satisfied · '+cached.hits+' cache hits · '+preflightSkipped+' unsupported skipped · '+preflightAuth+' auth-blocked','warn');
+   return;
+  }
+
+  const pipeline=directPipelineConcurrency(ready),blockedCollections=new Map(),progress={done:cached.hits+preflightSatisfied,failed:preflightFailed,authBlocked:preflightAuth,skipped:preflightSkipped};
+  log('Preflight complete. Starting '+pipeline+' bounded NASA download/convert pipeline(s) for '+ready.length.toLocaleString()+' remaining granule(s).','ok');
+  status(E.fetchStatus,(cached.hits+preflightSatisfied)+' already satisfied · '+ready.length+' bounded NASA downloads remain…','ok');
+
+  await runReliablePool(ready,pipeline,async(g,index)=>{
+   const block=blockedCollections.get(g.collectionId);
+   if(block){
+    g.conversionStatus=block.kind==='auth'?'auth_blocked':'skipped_unsupported';g.conversionError=block.message;if(block.kind!=='auth')g.routeFailed=true;
+    block.kind==='auth'?progress.authBlocked++:progress.skipped++;progress.done++;return false;
+   }
+   const started=performance.now();g.conversionStatus='running';g.conversionStartedAt=new Date().toISOString();
+   for(let attempt=1;attempt<=3;attempt++){
+    g.conversionAttempts=attempt;
+    try{
+     const result=await convertDirectGranule(g,pool),rows=result.rows||[];
+     appendRows(S.rows,rows);g.conversionStatus='ok';g.conversionRows=rows.length;g.sourceRows=result.sourceRows||0;g.conversionDurationMs=Math.round(performance.now()-started);g.conversionError='';g.cacheHit='miss';saveGranuleCache(g,rows,g.sourceRows);progress.done++;
+     status(E.fetchStatus,progress.done+'/'+originalTotal+' satisfied/handled · '+cached.hits+' cache hits · '+progress.failed+' failed · '+progress.skipped+' structurally skipped','ok');
+     return true;
+    }catch(e){
+     const cls=classifyConversionError(e),msg=String(e&&e.message?e.message:e);g.conversionError=msg;
+     if(cls==='auth'){
+      blockedCollections.set(g.collectionId,{kind:'auth',message:msg});g.conversionStatus='auth_blocked';progress.authBlocked++;progress.done++;return false;
+     }
+     if(cls==='structural'){
+      blockedCollections.set(g.collectionId,{kind:'structural',message:msg});g.conversionStatus='skipped_unsupported';g.routeFailed=true;progress.skipped++;progress.done++;
+      log('['+(index+1)+'/'+ready.length+'] '+g.title+': structural incompatibility found. Remaining files in this collection are blocked instead of repeating the same failure. '+msg,'warn');
+      return false;
+     }
+     if(cls==='permanent'){
+      g.conversionStatus='failed';progress.failed++;progress.done++;log('['+(index+1)+'/'+ready.length+'] '+g.title+': conversion error: '+msg,'error');return false;
+     }
+     if(attempt<3){await sleep(350*attempt);continue}
+     g.conversionStatus='failed';progress.failed++;progress.done++;return false;
+    }
+   }
+   return false;
+  });
+
+  const transient=ready.filter(g=>g.conversionStatus==='failed'&&RETRYABLE_RE.test(String(g.conversionError||'')));
+  if(transient.length){
+   log('Direct path left '+transient.length+' temporary transfer failure(s); using Supabase staging only for those files.','warn');
+   await recoverTransientViaStaging(transient,pool);
+  }
+ }finally{if(pool)pool.close()}
+
+ const ok=S.granules.filter(g=>g.conversionStatus==='ok').length,auth=S.granules.filter(g=>g.conversionStatus==='auth_blocked').length,failed=S.granules.filter(g=>g.conversionStatus==='failed').length,skipped=S.granules.filter(g=>g.conversionStatus==='skipped_unsupported'||g.conversionStatus==='skipped_bulk').length;
+ status(E.fetchStatus,'Finished: '+ok+'/'+S.granules.length+' satisfied · '+cached.hits+' cache hits · '+failed+' failed · '+skipped+' safely skipped · '+auth+' auth-blocked',auth||failed||skipped?'warn':'ok');
+ log('Fail-fast cache-aware pipeline complete: '+cached.hits+' reused · '+ok+' satisfied · '+skipped+' repeated/unsafe downloads avoided · '+failed+' isolated failure(s).','ok');
+}
 function base(g){const ts=g.start||g.end||'';return{latitude:'',longitude:'',timestamp:ts,date:ts?ts.slice(0,10):'',value:'',variable:S.search.component,unit:'',satellite:g.platform,collection:g.collectionShortName,granule:g.title,data_cycle:g.dataCycle,source:g.sourceLabel||'NASA Earthdata',source_url:g.provenanceUrl||g.url||''}}
 async function tif(buf,g){if(!globalThis.GeoTIFF)throw new Error('GeoTIFF library did not load');const t=await globalThis.GeoTIFF.fromArrayBuffer(buf),im=await t.getImage(),rs=await im.readRasters(),bb=im.getBoundingBox(),keys=im.getGeoKeys?im.getGeoKeys():{},nativeNoData=im.getGDALNoData?Number(im.getGDALNoData()):NaN,w=im.getWidth(),h=im.getHeight(),dx=(bb[2]-bb[0])/w,dy=(bb[3]-bb[1])/h,out=[],projected=Number(keys.ProjectedCSTypeGeoKey||0),geographic=Number(keys.GeographicTypeGeoKey||0),looksDegrees=Math.abs(bb[0])<=180&&Math.abs(bb[2])<=180&&Math.abs(bb[1])<=90&&Math.abs(bb[3])<=90,scale=Number.isFinite(Number(g.assetScale))?Number(g.assetScale):1,offset=Number.isFinite(Number(g.assetOffset))?Number(g.assetOffset):0,noData=Number.isFinite(Number(g.assetNoData))?Number(g.assetNoData):nativeNoData,inv3857=(x,y)=>{const lon=x/20037508.34*180,lat=180/Math.PI*(2*Math.atan(Math.exp((y/20037508.34*180)*Math.PI/180))-Math.PI/2);return[lon,lat]},invModis=(x,y)=>{const R=6371007.181,latRad=y/R,lat=latRad*180/Math.PI,cos=Math.cos(latRad),lon=Math.abs(cos)<1e-12?NaN:(x/(R*cos))*180/Math.PI;return[lon,lat]},hint=String(g.crsHint||'').toLowerCase(),useModis=hint==='modis_sinusoidal'&&!looksDegrees;if(!hint&&projected&&projected!==3857)throw new Error('Projected GeoTIFF EPSG:'+projected+' cannot be converted safely in-browser without a CRS definition.');for(let y=0;y<h;y++)for(let x=0;x<w;x++){const idx=y*w+x,rawY=bb[3]-(y+.5)*dy,rawX=bb[0]+(x+.5)*dx,ll=useModis?invModis(rawX,rawY):(projected===3857?inv3857(rawX,rawY):[rawX,rawY]),lon=ll[0],lat=ll[1];if(!Number.isFinite(lat)||!Number.isFinite(lon))continue;if(!hint&&!projected&&geographic&&geographic!==4326&&geographic!==4269)throw new Error('Geographic GeoTIFF EPSG:'+geographic+' is not safely supported.');for(let b=0;b<rs.length;b++){const raw=Number(rs[b][idx]);if(!Number.isFinite(raw)||(Number.isFinite(noData)&&raw===noData))continue;const v=raw*scale+offset;if(Number.isFinite(v))out.push(Object.assign(base(g),{latitude:lat,longitude:lon,value:v,variable:g.assetVariable||(rs.length>1?S.search.component+'_band_'+(b+1):S.search.component),unit:g.assetUnit||''}))}}return out}
 function findVar(r,names){const vs=r.variables||[],lo=names.map(x=>x.toLowerCase());return vs.find(v=>lo.includes(String(v.name).toLowerCase()))||vs.find(v=>lo.some(n=>String(v.name).toLowerCase().includes(n)))}
