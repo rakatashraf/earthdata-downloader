@@ -1,0 +1,25 @@
+name: Build Lupus Cortex 2025 CSV
+on:
+  push:
+    branches: [lupus-cortex-2025-dataset]
+    paths:
+      - scripts/build_lupus_2025.py
+      - .github/workflows/build-lupus-2025.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy pandas requests xarray pydap rasterio
+      - run: python scripts/build_lupus_2025.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lupus-cortex-2025-dynamic-csv
+          path: output/lupus_cortex_2025_dynamic.csv
+          compression-level: 6
