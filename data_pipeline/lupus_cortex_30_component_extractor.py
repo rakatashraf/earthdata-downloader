@@ -927,7 +927,7 @@ def _worldpop_poll(response: dict, timeout=180):
 
 def fetch_worldpop_population(lat, lon, year, area_km=5.0, resolution="100m"):
     year = max(2015, min(2030, int(year)))
-    payload = {"geometry": _worldpop_geometry(lat, lon, area_km), "year": year, "resolution": resolution}
+    payload = {"geojson": _worldpop_geometry(lat, lon, area_km), "year": year, "resolution": resolution}
     result = _worldpop_poll(_worldpop_request("population", payload))
     result = result if isinstance(result, dict) else {"raw": result}
     total = result.get("total_population") or result.get("population")
@@ -967,14 +967,21 @@ def fetch_worldpop_vulnerable_age(lat, lon, year, total_population, area_km=5.0,
     raw = []
     for lo, hi in ((0, 4), (65, 100)):
         payload = {
-            "geometry": _worldpop_geometry(lat, lon, area_km),
+            "geojson": _worldpop_geometry(lat, lon, area_km),
             "year": year, "resolution": resolution,
-            "age_range": f"{lo}-{hi}", "sex": "both"
+            "age_range": [lo, hi], "sex": "both"
         }
         try:
             result = _worldpop_poll(_worldpop_request("agesex", payload))
             raw.append(result)
-            vulnerable += _recursive_population_total(result)
+            pyramid = result.get("agesex_pyramid", []) if isinstance(result, dict) else []
+            if pyramid:
+                vulnerable += sum(
+                    float(r.get("male", 0) or 0) + float(r.get("female", 0) or 0)
+                    for r in pyramid if isinstance(r, dict)
+                )
+            else:
+                vulnerable += _recursive_population_total(result)
         except Exception as exc:
             raw.append({"error": str(exc)})
     if total_population and np.isfinite(total_population) and total_population > 0:
