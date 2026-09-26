@@ -1,0 +1,60 @@
+name: Build Lupus Cortex 2025 Dynamic Dataset
+
+on:
+  push:
+    branches:
+      - lupus-cortex-2025-dataset-build
+    paths:
+      - scripts/build_lupus_cortex_2025_dataset.py
+      - .github/workflows/build-lupus-cortex-2025.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lupus-cortex-2025-dataset-build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pandas numpy requests
+      - name: Build dataset
+        run: python scripts/build_lupus_cortex_2025_dataset.py
+      - name: Validate CSV
+        run: |
+          python - <<'PY'
+          import csv, os
+          p='artifacts/lupus_cortex_2025_dynamic.csv'
+          assert os.path.exists(p)
+          with open(p,encoding='utf-8') as f:
+              r=csv.DictReader(f)
+              ids=set(); n=0
+              for row in r:
+                  n+=1
+                  ids.add(int(row['component_id']))
+                  assert row['value'] != ''
+              assert ids == set(range(1,31)), sorted(ids)
+              assert n > 10000, n
+          print('validated', n, 'rows and all 30 components')
+          PY
+      - name: Commit generated CSV
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/lupus_cortex_2025_dynamic.csv
+          git commit -m "[skip ci] Generate Lupus Cortex 2025 dynamic CSV"
+          git push origin HEAD:lupus-cortex-2025-dataset-build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lupus-cortex-2025-dynamic-csv
+          path: artifacts/lupus_cortex_2025_dynamic.csv
+          if-no-files-found: error
+          retention-days: 30
