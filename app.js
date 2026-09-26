@@ -215,8 +215,13 @@ async function fetchSelected(){
   S.granules=Array.from(dedup.values()).sort((a,b)=>Date.parse(a.start||0)-Date.parse(b.start||0));metrics();
   if(!S.granules.length){status(E.fetchStatus,'No downloadable NASA granules intersect the exact requested date range and area.','warn');return}
 
-  const pending=S.granules.filter(g=>g.conversionStatus!=='ok'&&!g.routeFailed);
-  if(pending.length){status(E.fetchStatus,pending.length+' bounded native granule(s) remain after official server-side routing. Checking converted cache…','ok');await convertAll()}
+  let pending=S.granules.filter(g=>g.conversionStatus!=='ok'&&!g.routeFailed);
+  if(totalDirectTooLarge(pending)){
+   const bytes=pending.reduce((n,g)=>n+(Number(g.sizeBytes)||0),0),reason='Global raw-transfer guard stopped '+pending.length.toLocaleString()+' fallback granules'+(bytes?' ('+(bytes/1073741824).toFixed(2)+' GB reported)':'')+'. Official server-side subset routes were unavailable, so the browser will not start a multi-hour archive download.';
+   for(const g of pending){g.conversionStatus='skipped_bulk';g.conversionError=reason;g.routeFailed=true;g.downloadRoute='global-bulk-download-guard'}
+   log(reason,'warn');pending=[];
+  }
+  if(pending.length){status(E.fetchStatus,pending.length+' bounded direct granule job(s) after server-side routing. Checking cache before transfer…','ok');await convertAll()}
   else status(E.fetchStatus,'Server-side routing / safety checks finished. Preparing coverage manifest…','ok');
 
   const elapsed=Math.round(performance.now()-overallStarted);
@@ -299,7 +304,7 @@ function conversionConcurrency(items){const hc=Math.max(2,Number(navigator.hardw
 function conversionAverageMs(items){const done=(items||[]).filter(g=>g.conversionStatus==='ok'&&Number.isFinite(Number(g.conversionDurationMs)));return done.length?Math.round(done.reduce((n,g)=>n+Number(g.conversionDurationMs),0)/done.length):0}
 class GranuleWorkerPool{
   constructor(size){this.size=size;this.queue=[];this.slots=[];for(let i=0;i<size;i++)this.slots.push(this.spawn(i))}
-  spawn(index){const workerUrl=new URL('./granule-worker.js?v=20260926-1535',document.baseURI),worker=new Worker(workerUrl,{type:'module'}),slot={index,worker,busy:false,job:null};worker.onmessage=e=>{const job=slot.job,d=e.data||{};slot.job=null;slot.busy=false;if(job){if(d.ok)job.resolve({rows:d.rows||[],sourceRows:Number(d.sourceRows)||0,coordinateBackend:d.coordinateBackend||''});else job.reject(new Error(d.error||'Granule worker failed.'))}this.pump()};worker.onerror=e=>{const job=slot.job;try{worker.terminate()}catch(x){}const fresh=this.spawn(index);this.slots[index]=fresh;if(job)job.reject(new Error('Granule worker error: '+(e.message||'unknown worker failure')));this.pump()};return slot}
+  spawn(index){const workerUrl=new URL('./granule-worker.js?v=20260926-1618',document.baseURI),worker=new Worker(workerUrl,{type:'module'}),slot={index,worker,busy:false,job:null};worker.onmessage=e=>{const job=slot.job,d=e.data||{};slot.job=null;slot.busy=false;if(job){if(d.ok)job.resolve({rows:d.rows||[],sourceRows:Number(d.sourceRows)||0,coordinateBackend:d.coordinateBackend||''});else job.reject(new Error(d.error||'Granule worker failed.'))}this.pump()};worker.onerror=e=>{const job=slot.job;try{worker.terminate()}catch(x){}const fresh=this.spawn(index);this.slots[index]=fresh;if(job)job.reject(new Error('Granule worker error: '+(e.message||'unknown worker failure')));this.pump()};return slot}
   run(payload,buffer){return new Promise((resolve,reject)=>{this.queue.push({payload,buffer,resolve,reject});this.pump()})}
   pump(){for(const slot of this.slots){if(slot.busy||!this.queue.length)continue;const job=this.queue.shift();slot.busy=true;slot.job=job;try{slot.worker.postMessage(Object.assign({},job.payload,{buffer:job.buffer}),[job.buffer])}catch(e){slot.job=null;slot.busy=false;job.reject(e)}}}
   close(){for(const slot of this.slots)try{slot.worker.terminate()}catch(e){}this.queue.length=0}
@@ -351,7 +356,10 @@ async function tryHarmonyFastCollection(c,gs){const totalBytes=gs.reduce((n,g)=>
 const EDD_DOWNLOAD_CONCURRENCY=5;
 const MAX_DIRECT_GRANULES_PER_COLLECTION=240;
 const MAX_DIRECT_BYTES_PER_COLLECTION=2*1024*1024*1024;
+const MAX_TOTAL_DIRECT_GRANULES=240;
+const MAX_TOTAL_DIRECT_BYTES=2*1024*1024*1024;
 function directCollectionTooLarge(gs){const bytes=(gs||[]).reduce((n,g)=>n+(Number(g.sizeBytes)||0),0);return (gs||[]).length>MAX_DIRECT_GRANULES_PER_COLLECTION||bytes>MAX_DIRECT_BYTES_PER_COLLECTION}
+function totalDirectTooLarge(gs){const bytes=(gs||[]).reduce((n,g)=>n+(Number(g.sizeBytes)||0),0);return (gs||[]).length>MAX_TOTAL_DIRECT_GRANULES||bytes>MAX_TOTAL_DIRECT_BYTES}
 function directPipelineConcurrency(items){return Math.max(1,Math.min(EDD_DOWNLOAD_CONCURRENCY,(items||[]).length||1))}
 async function convertDirectGranule(g,pool){const r=await downloadGranule(g),ct=r.headers.get('content-type')||g.downloadContentType||'',disposition=r.headers.get('content-disposition')||g.downloadDisposition||'',finalUrl=r.headers.get('x-final-url')||g.downloadFinalUrl||g.downloadSourceUrl||g.url,started=performance.now(),raw=await r.arrayBuffer(),normalized=await normalizeDownloadedBuffer(raw,g,ct,disposition,finalUrl),buf=normalized.buffer,k=normalized.format;g.sourceFormat=k==='hdf4'?'hdf4':k;g.compressionWrapper=normalized.wrapper||'';g.downloadBytes=raw.byteLength;g.unwrappedBytes=buf.byteLength;g.downloadCompletedAt=new Date().toISOString();if(k==='hdf4')return convertNativeHdf4(buf,g);if(!['geotiff','netcdf','csv','json','hdf'].includes(k)){const cd=fileNameFromDisposition(disposition),hint=[ct,cd,finalUrl].filter(Boolean).join(' | ');throw new Error('NASA granule downloaded successfully but its scientific format could not be identified. First bytes='+Array.from(new Uint8Array(raw,0,Math.min(16,raw.byteLength))).map(x=>x.toString(16).padStart(2,'0')).join(' ')+'; headers='+hint.slice(0,500))}const result=await parseGranuleWorker(pool,buf,k,g);g.decodeMs=Math.round(performance.now()-started);return result}
 async function recoverTransientViaStaging(items,pool){if(!items.length)return;const xid=extractionId(),staged=await runReliablePool(items,Math.min(STAGING_CONCURRENCY,items.length),(g,i)=>stageOne(g,xid,i,items.length)),ready=staged.filter(x=>x&&x.ok).map(x=>x.g);if(!ready.length)return;await runReliablePool(ready,Math.min(conversionConcurrency(ready),ready.length),async(g,i)=>{try{const result=await convertAttempt(g,pool),rows=result.rows||[];S.rows.push(...rows);g.conversionStatus='ok';g.conversionRows=rows.length;g.sourceRows=result.sourceRows||0;g.conversionError='';g.recoveredFromStaging=true;return true}catch(e){g.conversionStatus='failed';g.conversionError=String(e&&e.message?e.message:e);return false}finally{await cleanupStage(g,xid)}})}
@@ -442,7 +450,7 @@ async function convertAll(){
 
   const pipeline=directPipelineConcurrency(ready),blockedCollections=new Map(),progress={done:cached.hits+preflightSatisfied,failed:preflightFailed,authBlocked:preflightAuth,skipped:preflightSkipped};
   log('Preflight complete. Starting '+pipeline+' bounded NASA download/convert pipeline(s) for '+ready.length.toLocaleString()+' remaining granule(s).','ok');
-  status(E.fetchStatus,(cached.hits+preflightSatisfied)+' already satisfied · '+ready.length+' bounded NASA downloads remain…','ok');
+  status(E.fetchStatus,(cached.hits+preflightSatisfied)+' already satisfied · '+ready.length+' bounded direct job(s) queued after cache/preflight','ok');
 
   await runReliablePool(ready,pipeline,async(g,index)=>{
    const block=blockedCollections.get(g.collectionId);

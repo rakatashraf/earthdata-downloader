@@ -98,6 +98,12 @@ test('Large direct collections are guarded after official subset routes are exha
  assert.equal(c.directCollectionTooLarge(items.slice(0,240)),false);
 });
 
+test('Aggregate raw fallback is capped across collections',()=>{
+ const c=app(),items=Array.from({length:241},(_,i)=>({collectionId:'C'+(i%20),sizeBytes:1}));
+ assert.equal(c.totalDirectTooLarge(items),true);
+ assert.equal(c.totalDirectTooLarge(items.slice(0,240)),false);
+});
+
 test('Structural error classifier is distinct from transient and auth failures',()=>{
  const c=app();
  assert.equal(c.classifyConversionError(new Error('could not derive in-area coordinates from HDF-EOS/grid bounds metadata')),'structural');

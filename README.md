@@ -29,8 +29,10 @@ in session storage and are sent only to NASA and the configured NASA proxy.
 - Search selects one compatible collection by default. Users can select more or
   use Select All. Selecting every NDVI collection can queue thousands of files.
 - Download concurrency is bounded at five. Authorization errors block remaining
-  work for that collection while other collections continue. Optional remote cache
-  lookups time out; successful local cache writes are awaited before completion.
+  work for that collection while other collections continue. A global raw-transfer
+  guard also prevents many individually-small collections from accumulating into
+  thousands of fallback downloads. Optional remote cache lookups time out; successful
+  local cache writes are awaited before completion.
 - Point extraction retains each timestamp rather than collapsing an entire time
   series to one nearest pixel.
 
