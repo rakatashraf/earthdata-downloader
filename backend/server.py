@@ -46,6 +46,8 @@ async def convert(request:Request,component:str,bbox:str,format:str=''):
                     result=await run_in_threadpool(convert_hdf4,path,[component.strip()],bounds)
                 for row in result.get('rows',[]): row.update({k:v for k,v in _meta(request).items() if k not in row})
                 return result
+            if not format.strip():
+                raise HTTPException(415,'Scientific format was not identified')
             result=await run_in_threadpool(convert_file,path,format,component.strip(),bounds,_meta(request))
             result['sourceRows']=len(result.get('rows',[])); result['coordinateBackend']='native-python'
             return result
