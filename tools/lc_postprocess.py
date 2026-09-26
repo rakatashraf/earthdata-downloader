@@ -3,7 +3,7 @@ import pandas as pd
 
 src=Path('lc_output/Dhaka_23_81030_90_41250/components_daily_long.csv')
 out=Path('lc_output/LUPUS_CORTEX_2025_DYNAMIC_MASTER.csv')
-manifest=pd.read_csv('tools/collection_manifest.csv')
+manifest=pd.read_csv('tools/collection_manifest.csv', skiprows=2)
 cycle={
 'PM2_5':'hourly','PM10':'hourly','NO2':'daily','O3':'daily','SO2':'daily','CO':'daily','AEROSOL_INDEX':'daily','LST':'daily','AIR_TEMP':'hourly','REL_HUMIDITY':'hourly','NDVI':'16-day composite','GREEN_SPACE_PCT':'scene-based','BUILTUP_PCT':'scene-based','IMPERVIOUS_PCT':'scene/annual composite','PRECIPITATION':'30 minutes','EXTREME_RAINFALL':'daily/event derived','SOIL_MOISTURE':'daily','SURFACE_WATER_EXTENT':'~3-12 days/observation','FLOOD_EXTENT':'event/observation','DROUGHT_SPI':'monthly + daily','POP_DENSITY':'reference snapshot','VULNERABLE_AGE_PCT':'reference snapshot','ROAD_DENSITY':'snapshot','TRANSPORT_ACCESS_PCT':'schedule/snapshot','HOSPITAL_ACCESS':'snapshot','GREEN_ACCESS_PCT':'annual/scene composite','CRIT_INFRA_DENSITY':'snapshot','NIGHT_LIGHTS':'daily','ELEVATION_SLOPE':'static','DISASTER_READINESS':'daily/monthly/event derived'}
 urls={
