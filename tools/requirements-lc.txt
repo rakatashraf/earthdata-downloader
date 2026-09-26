@@ -1,0 +1,14 @@
+numpy<3
+pandas>=2.2
+requests>=2.32
+requests-cache>=1.2
+xarray>=2025.1
+netCDF4>=1.7
+pystac-client>=0.8
+planetary-computer>=1.0
+rasterio>=1.4
+scipy>=1.14
+shapely>=2.0
+pyproj>=3.7
+h5py>=3.12
+openpyxl>=3.1
