@@ -218,10 +218,25 @@ grep -q "concatenate" app.js
 
 grep -q "maxResults" app.js
 
-grep -q "FAST COLLECTION MODE" app.js
 
-grep -q "Collection finished in" app.js
 
-grep -q "All selected NASA collections finished through fast server-side reduction" app.js
+
+grep -q "Instant mode: resolving exact CMR granules in parallel" app.js
+
+grep -q "NASA ready in" app.js
+
+grep -q "NASA_DIRECT_HOST_MODE" app.js
+
+grep -q "directNasaFetch" app.js
+
+grep -q "setTimeout(()=>ctrl.abort(),900)" app.js
+
+grep -q "download_route" app.js
+
+grep -q "Array.from({length:pages-1}" app.js
+
+! grep -q "tryHarmonyFastCollection(cc,gs)" app.js
+
+grep -q "setTimeout(()=>fetchAlternatives" app.js
 
 echo "Static product validation passed."
