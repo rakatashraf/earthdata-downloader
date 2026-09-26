@@ -1,0 +1,61 @@
+name: Lupus Cortex 2025 Dynamic Export
+
+on:
+  push:
+    branches: [lc-2025-dynamic-export]
+    paths:
+      - '.github/workflows/lc-2025-export.yml'
+      - 'tools/lc2025_extractor.py'
+      - 'tools/lc_postprocess.py'
+      - 'tools/collection_manifest.csv'
+      - 'tools/requirements-lc.txt'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install extraction dependencies
+        run: pip install -r tools/requirements-lc.txt
+
+      - name: Fetch 2025 component data
+        run: |
+          python tools/lc2025_extractor.py \
+            --lat 23.8103 --lon 90.4125 --name Dhaka \
+            --date 2025-12-31 --days 365 --area-km 5 \
+            --workbook tools/nonexistent.xlsx --output lc_output
+
+      - name: Build one dynamic master CSV
+        run: python tools/lc_postprocess.py
+
+      - name: Validate output
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          p='lc_output/LUPUS_CORTEX_2025_DYNAMIC_MASTER.csv'
+          df=pd.read_csv(p)
+          assert len(df) == 365*30, (len(df), 365*30)
+          assert df['component'].nunique() == 30
+          assert str(df['date'].min())[:10] == '2025-01-01'
+          assert str(df['date'].max())[:10] == '2025-12-31'
+          print(df.shape)
+          print(df.groupby('component')['value'].count().to_string())
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lupus-cortex-2025-dynamic-master
+          path: |
+            lc_output/LUPUS_CORTEX_2025_DYNAMIC_MASTER.csv
+            lc_output/Dhaka_23_81030_90_41250/component_coverage.csv
+            lc_output/Dhaka_23_81030_90_41250/extraction_errors.csv
+          if-no-files-found: error
+          retention-days: 7
