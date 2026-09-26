@@ -1008,3 +1008,689 @@ def _mercator_tile(lon, lat, z=9):
 
 def resolve_latest_gibs_date(lat, lon, requested_date, max_back_days=10, timeout=30):
     d = pd.Timestamp(requested_date).normalize()
+    x, y = _mercator_tile(lon, lat, 9)
+    for lag in range(max_back_days + 1):
+        dd = d - pd.Timedelta(days=lag)
+        url = f"{GIBS_BASE}/{GIBS_LAYER}/default/{dd.date()}/{GIBS_MATRIX}/9/{y}/{x}.jpg"
+        try:
+            r = requests.get(url, timeout=timeout, stream=True)
+            if r.ok and "image" in r.headers.get("content-type", ""):
+                return {
+                    "requested_date": str(d.date()), "imagery_date": str(dd.date()),
+                    "lag_days": lag, "fallback_used": lag > 0, "layer": GIBS_LAYER,
+                    "url": url, "numerical_use": False,
+                }
+        except Exception:
+            pass
+    return {
+        "requested_date": str(d.date()), "imagery_date": None, "lag_days": None,
+        "fallback_used": None, "layer": GIBS_LAYER, "numerical_use": False,
+    }
+
+
+# -----------------------------------------------------------------------------
+# 7. Optional Earthdata Black Marble VNP46A3 adapter
+# -----------------------------------------------------------------------------
+
+
+def earthdata_login_interactive():
+    import earthaccess
+    return earthaccess.login(strategy="interactive", persist=True)
+
+
+def _find_h5_dataset(h5, candidates: Iterable[str]):
+    import h5py
+    found = []
+    def visitor(name, obj):
+        if isinstance(obj, h5py.Dataset):
+            lower = name.lower()
+            if any(c.lower() in lower for c in candidates):
+                found.append(name)
+    h5.visititems(visitor)
+    return found[0] if found else None
+
+
+def _sample_black_marble_hdf(path, lat, lon):
+    import h5py
+    name = Path(path).name
+    tile_match = re.search(r"\.h(\d{2})v(\d{2})\.", name)
+    if tile_match is None:
+        raise ValueError("Could not infer Black Marble h/v tile from filename")
+    h, v = int(tile_match.group(1)), int(tile_match.group(2))
+    with h5py.File(path, "r") as h5:
+        dataset_name = _find_h5_dataset(h5, ["AllAngle_Composite_Snow_Free", "NearNadir_Composite_Snow_Free"])
+        if dataset_name is None:
+            raise KeyError("Black Marble radiance dataset not found")
+        ds = h5[dataset_name]
+        if len(ds.shape) != 2:
+            raise ValueError(f"Unexpected Black Marble radiance shape: {ds.shape}")
+        west = -180 + h * 10
+        north = 90 - v * 10
+        row = int((north - lat) / 10 * ds.shape[0])
+        col = int((lon - west) / 10 * ds.shape[1])
+        row = max(0, min(ds.shape[0] - 1, row))
+        col = max(0, min(ds.shape[1] - 1, col))
+        raw = float(ds[row, col])
+        fill = ds.attrs.get("_FillValue", ds.attrs.get("FillValue"))
+        if fill is not None and raw == float(np.asarray(fill).ravel()[0]):
+            return np.nan
+        scale = float(np.asarray(ds.attrs.get("scale_factor", 1.0)).ravel()[0])
+        offset = float(np.asarray(ds.attrs.get("add_offset", 0.0)).ravel()[0])
+        return raw * scale + offset
+
+
+def fetch_black_marble_monthly(lat, lon, start, end, download_dir) -> pd.Series:
+    import earthaccess
+    Path(download_dir).mkdir(parents=True, exist_ok=True)
+    granules = earthaccess.search_data(
+        short_name="VNP46A3", version="002", point=(float(lon), float(lat)),
+        temporal=(str(pd.Timestamp(start).date()), str(pd.Timestamp(end).date()))
+    )
+    if not granules:
+        return pd.Series(dtype=float)
+    paths = earthaccess.download(granules, local_path=str(download_dir))
+    rows = []
+    for p in paths:
+        try:
+            value = _sample_black_marble_hdf(p, lat, lon)
+            m = re.search(r"\.A(\d{4})(\d{3})\.", Path(p).name)
+            date = pd.to_datetime(f"{m.group(1)}-{m.group(2)}", format="%Y-%j") if m else pd.Timestamp(Path(p).stat().st_mtime, unit="s").normalize()
+            if np.isfinite(value):
+                rows.append((date, value))
+        except Exception:
+            continue
+    if not rows:
+        return pd.Series(dtype=float)
+    return pd.DataFrame(rows, columns=["date", "value"]).groupby("date").value.mean().sort_index()
+
+
+# -----------------------------------------------------------------------------
+# 8. Main extractor
+# -----------------------------------------------------------------------------
+
+class LupusCortexExtractor:
+    def __init__(self, config: Optional[ExtractorConfig] = None):
+        self.cfg = config or ExtractorConfig()
+        self.registry = load_indicator_registry(self.cfg.workbook_path)
+        Path(self.cfg.output_root).mkdir(parents=True, exist_ok=True)
+        try:
+            import requests_cache
+            requests_cache.install_cache(str(Path(self.cfg.output_root) / "http_cache"), expire_after=3600)
+        except Exception:
+            pass
+
+    def _row(
+        self, component, date, value=np.nan, *, status="observed", source=None, dataset=None,
+        variable=None, method=None, measurement_date=None, lag_days=None, qa_score=None,
+        is_proxy=False, metadata=None, error=None, unit=None
+    ):
+        return {
+            "date": pd.Timestamp(date).normalize(),
+            "component": component,
+            "value": float(value) if value is not None and np.isfinite(value) else np.nan,
+            "unit": unit or FRONTEND_META[component][0],
+            "status": status,
+            "source": source,
+            "dataset": dataset,
+            "variable": variable,
+            "method": method,
+            "measurement_date": pd.Timestamp(measurement_date).normalize() if measurement_date is not None and not pd.isna(measurement_date) else pd.NaT,
+            "lag_days": int(lag_days) if lag_days is not None and not pd.isna(lag_days) else np.nan,
+            "qa_score": qa_score,
+            "is_proxy": bool(is_proxy),
+            "metadata_json": safe_json(metadata or {}),
+            "error": error,
+        }
+
+    def extract(
+        self, lat: float, lon: float, name="Selected location", requested_date=None,
+        lookback_days=None, location_id_override=None
+    ) -> dict:
+        cfg = self.cfg
+        req = requested_date_or_today(requested_date)
+        lookback = int(lookback_days or cfg.lookback_days)
+        idx = date_range_ending(req, lookback)
+        baseline_start = req - pd.Timedelta(days=max(cfg.baseline_days, lookback) - 1)
+        location_id = location_id_override or make_location_id(name, lat, lon)
+        outdir = cfg.output_dir(location_id)
+        errors: List[str] = []
+        rows: List[dict] = []
+        provenance: List[dict] = []
+
+        self.registry.to_csv(outdir / "component_registry.csv", index=False, encoding="utf-8-sig")
+
+        # 1. GEOS-CF atmospheric + meteorological variables.
+        try:
+            geos, prov, geos_errors = fetch_geos_cf(lat, lon, baseline_start, req)
+            errors.extend(geos_errors)
+            for key in ["PM2_5", "PM10", "NO2", "O3", "SO2", "CO", "AEROSOL_INDEX", "AIR_TEMP", "REL_HUMIDITY", "PRECIPITATION"]:
+                if key not in geos:
+                    continue
+                meta = prov.get(key, {})
+                series = geos[key].reindex(idx)
+                for d, value in series.items():
+                    rows.append(self._row(
+                        key, d, value,
+                        status="observed" if np.isfinite(value) else "missing",
+                        source=meta.get("source"), dataset=meta.get("dataset"), variable=meta.get("variable"),
+                        method=meta.get("method"), measurement_date=d if np.isfinite(value) else None,
+                        lag_days=0 if np.isfinite(value) else None,
+                    ))
+                provenance.append({"component": key, **meta})
+        except Exception as exc:
+            errors.append(f"GEOS-CF provider: {exc}")
+
+        def add_sparse(key, series, max_lag, source, dataset, variable, method, is_proxy=False):
+            aligned, measurement_dates, lags = align_sparse_to_daily(series, idx, max_lag)
+            for d in idx:
+                value = aligned.get(d, np.nan)
+                lag = lags.get(d, np.nan)
+                if np.isfinite(value):
+                    status = "observed" if lag == 0 else "carried_forward"
+                else:
+                    status = "missing"
+                rows.append(self._row(
+                    key, d, value, status=status, source=source, dataset=dataset, variable=variable,
+                    method=method, measurement_date=measurement_dates.get(d), lag_days=lag,
+                    is_proxy=is_proxy
+                ))
+            provenance.append({
+                "component": key, "source": source, "dataset": dataset, "variable": variable,
+                "method": method, "is_proxy": is_proxy
+            })
+
+        # 2. MODIS LST.
+        try:
+            series = fetch_modis_lst(lat, lon, idx[0] - pd.Timedelta(days=cfg.max_lag_lst_days), req)
+            add_sparse(
+                "LST", series, cfg.max_lag_lst_days,
+                "NASA MODIS via Microsoft Planetary Computer", "MOD11A1.061", "LST_Day_1km",
+                "QC-filtered LST, scale 0.02 K, converted to Celsius"
+            )
+        except Exception as exc:
+            errors.append(f"MODIS LST: {exc}")
+
+        # 3. MODIS NDVI.
+        try:
+            series = fetch_modis_ndvi(lat, lon, idx[0] - pd.Timedelta(days=cfg.max_lag_ndvi_days), req)
+            add_sparse(
+                "NDVI", series, cfg.max_lag_ndvi_days,
+                "NASA MODIS via Microsoft Planetary Computer", "MOD13A1.061", "500m_16_days_NDVI",
+                "pixel-reliability filtered, scale 0.0001"
+            )
+        except Exception as exc:
+            errors.append(f"MODIS NDVI: {exc}")
+
+        # 4. HLS dynamic land-cover metrics with WorldCover fallback.
+        hls = pd.DataFrame()
+        worldcover = {}
+        try:
+            hls_start = max(idx[0] - pd.Timedelta(days=cfg.max_lag_hls_days), req - pd.Timedelta(days=cfg.hls_search_days))
+            # Full-year HLS scene stacks are intentionally skipped in this bounded acquisition run.
+            # WorldCover below remains a real observed land-cover fallback with explicit provenance.
+            hls = pd.DataFrame()
+        except Exception as exc:
+            errors.append(f"HLS metrics: {exc}")
+        try:
+            worldcover = fetch_worldcover_static(lat, lon, cfg.analysis_area_km, cfg.green_access_m)
+        except Exception as exc:
+            errors.append(f"WorldCover fallback: {exc}")
+
+        for key in ["GREEN_SPACE_PCT", "BUILTUP_PCT", "IMPERVIOUS_PCT", "SURFACE_WATER_EXTENT", "GREEN_ACCESS_PCT"]:
+            try:
+                if not hls.empty and key in hls.columns:
+                    add_sparse(
+                        key, hls[key], cfg.max_lag_hls_days,
+                        "NASA HLS v2 via Microsoft Planetary Computer", "HLSL30/HLSS30 v2", "derived spectral masks",
+                        "AOI percentage derived from NDVI/MNDWI/NDBI with cloud/snow masking",
+                        is_proxy=(key == "IMPERVIOUS_PCT")
+                    )
+                elif key in worldcover:
+                    for d in idx:
+                        rows.append(self._row(
+                            key, d, worldcover[key], status="static_fallback",
+                            source="ESA WorldCover via Microsoft Planetary Computer", dataset="ESA WorldCover", variable="map",
+                            method=worldcover.get("_method"), measurement_date=req,
+                            is_proxy=(key == "IMPERVIOUS_PCT"), metadata={"year": worldcover.get("_year")}
+                        ))
+                    provenance.append({
+                        "component": key, "source": "ESA WorldCover", "method": worldcover.get("_method"),
+                        "is_proxy": key == "IMPERVIOUS_PCT"
+                    })
+            except Exception as exc:
+                errors.append(f"{key}: {exc}")
+
+        # 5. Soil moisture fallback.
+        if not cfg.strict_no_proxy:
+            try:
+                soil = fetch_soil_moisture_fallback(lat, lon, baseline_start, req, cfg.request_timeout_s).reindex(idx)
+                for d, value in soil.items():
+                    rows.append(self._row(
+                        "SOIL_MOISTURE", d, value,
+                        status="proxy_reanalysis" if np.isfinite(value) else "missing",
+                        source="Open-Meteo Historical API / ERA5-Land", dataset="ERA5-Land",
+                        variable="soil_moisture_0_to_7cm", method="near-surface soil-moisture fallback",
+                        measurement_date=d if np.isfinite(value) else None, lag_days=0 if np.isfinite(value) else None,
+                        is_proxy=True
+                    ))
+                provenance.append({
+                    "component": "SOIL_MOISTURE", "source": "ERA5-Land via Open-Meteo", "is_proxy": True,
+                    "note": "Replace with direct SMAP adapter for strict NASA-native production."
+                })
+            except Exception as exc:
+                errors.append(f"Soil moisture fallback: {exc}")
+
+        def current_long() -> pd.DataFrame:
+            return pd.DataFrame(rows)
+
+        def series_from_rows(key, full_index=idx):
+            frame = current_long()
+            if frame.empty:
+                return pd.Series(index=full_index, dtype=float)
+            x = frame[(frame.component == key) & frame.value.notna()].copy()
+            if x.empty:
+                return pd.Series(index=full_index, dtype=float)
+            return x.sort_values("date").drop_duplicates("date", keep="last").set_index("date").value.astype(float).reindex(full_index)
+
+        # 6. Extreme rainfall percentile.
+        try:
+            p = series_from_rows("PRECIPITATION")
+            minp = min(30, max(5, int(len(p) / 3)))
+            extreme = rolling_percentile_rank(p, baseline_days=min(cfg.baseline_days, len(p)), min_periods=minp)
+            for d, value in extreme.items():
+                rows.append(self._row(
+                    "EXTREME_RAINFALL", d, value,
+                    status="derived" if np.isfinite(value) else "missing",
+                    source="Derived from daily precipitation", dataset="Lupus Cortex derived feature",
+                    variable="precipitation percentile rank", method="rolling empirical percentile rank",
+                    measurement_date=d if np.isfinite(value) else None, lag_days=0 if np.isfinite(value) else None
+                ))
+            provenance.append({"component": "EXTREME_RAINFALL", "source": "Derived", "method": "empirical precipitation percentile"})
+        except Exception as exc:
+            errors.append(f"Extreme rainfall: {exc}")
+
+        # 7. Flood extent proxy from excess surface water.
+        try:
+            water = series_from_rows("SURFACE_WATER_EXTENT")
+            if water.notna().sum() >= 3:
+                baseline_water = float(np.nanpercentile(water.dropna(), 20))
+            else:
+                baseline_water = float(worldcover.get("SURFACE_WATER_EXTENT", np.nan))
+            flood = (water - baseline_water).clip(lower=0) if np.isfinite(baseline_water) else pd.Series(index=idx, dtype=float)
+            for d, value in flood.items():
+                rows.append(self._row(
+                    "FLOOD_EXTENT", d, value,
+                    status="derived_proxy" if np.isfinite(value) else "missing",
+                    source="Derived HLS/WorldCover water anomaly", dataset="Lupus Cortex flood proxy",
+                    variable="excess surface-water percentage",
+                    method=f"max(0, surface_water_pct - baseline_water_pct={baseline_water:.3f})" if np.isfinite(baseline_water) else "baseline unavailable",
+                    measurement_date=d if np.isfinite(value) else None, lag_days=0 if np.isfinite(value) else None,
+                    is_proxy=True
+                ))
+            provenance.append({
+                "component": "FLOOD_EXTENT", "source": "Derived HLS water anomaly", "is_proxy": True,
+                "note": "Proxy; replace with operational flood product for strict production."
+            })
+        except Exception as exc:
+            errors.append(f"Flood extent proxy: {exc}")
+
+        # 8. Drought standardized anomaly proxy.
+        try:
+            p = series_from_rows("PRECIPITATION")
+            sm = series_from_rows("SOIL_MOISTURE")
+            p30 = p.rolling(30, min_periods=10).sum()
+            minp = min(30, max(10, int(len(p) / 3)))
+            zp = rolling_zscore(p30, baseline_days=min(cfg.baseline_days, len(p30)), min_periods=minp)
+            zs = rolling_zscore(sm, baseline_days=min(cfg.baseline_days, len(sm)), min_periods=minp)
+            drought = pd.concat([zp, zs], axis=1).mean(axis=1, skipna=True)
+            for d, value in drought.items():
+                rows.append(self._row(
+                    "DROUGHT_SPI", d, value,
+                    status="derived_proxy" if np.isfinite(value) else "missing",
+                    source="Derived precipitation + soil-moisture anomaly", dataset="Lupus Cortex drought anomaly proxy",
+                    variable="mean standardized anomaly", method="mean(z(30-day precipitation), z(soil moisture)); NOT formal SPI",
+                    measurement_date=d if np.isfinite(value) else None, lag_days=0 if np.isfinite(value) else None,
+                    is_proxy=True
+                ))
+            provenance.append({
+                "component": "DROUGHT_SPI", "source": "Derived", "is_proxy": True,
+                "note": "Standardized anomaly proxy, not a formal climatological SPI without a longer baseline."
+            })
+        except Exception as exc:
+            errors.append(f"Drought anomaly: {exc}")
+
+        # 9. WorldPop population + vulnerable age.
+        pop_result = None
+        try:
+            pop_result = fetch_worldpop_population(lat, lon, req.year, cfg.analysis_area_km)
+            value = pop_result.get("population_density", np.nan)
+            for d in idx:
+                rows.append(self._row(
+                    "POP_DENSITY", d, value,
+                    status="static_observed" if np.isfinite(value) else "missing",
+                    source="WorldPop API v2", dataset="WorldPop population", variable="population_density",
+                    method="AOI population / AOI area", measurement_date=pd.Timestamp(f"{pop_result.get('year', req.year)}-01-01"),
+                    metadata={
+                        "total_population": pop_result.get("total_population"),
+                        "area_km2": pop_result.get("area_km2"), "year": pop_result.get("year")
+                    }
+                ))
+            provenance.append({"component": "POP_DENSITY", "source": "WorldPop API v2", "year": pop_result.get("year")})
+        except Exception as exc:
+            errors.append(f"Population density: {exc}")
+
+        try:
+            total = (pop_result or {}).get("total_population", np.nan)
+            vuln = fetch_worldpop_vulnerable_age(lat, lon, req.year, total, cfg.analysis_area_km)
+            value = vuln.get("value", np.nan)
+            for d in idx:
+                rows.append(self._row(
+                    "VULNERABLE_AGE_PCT", d, value,
+                    status="static_observed" if np.isfinite(value) else "missing",
+                    source="WorldPop API v2", dataset="WorldPop age-sex", variable="age 0-4 + age 65-100",
+                    method="(vulnerable-age population / total population) * 100",
+                    measurement_date=pd.Timestamp(f"{vuln.get('year', req.year)}-01-01"), metadata={"year": vuln.get("year")}
+                ))
+            provenance.append({"component": "VULNERABLE_AGE_PCT", "source": "WorldPop API v2", "year": vuln.get("year")})
+        except Exception as exc:
+            errors.append(f"Vulnerable-age population: {exc}")
+
+        # 10. OSM network/accessibility.
+        try:
+            osm = fetch_osm_metrics(lat, lon, cfg.analysis_area_km, cfg.transit_access_m, cfg.overpass_timeout_s)
+            methods = {
+                "ROAD_DENSITY": "drivable road length / AOI area",
+                "TRANSPORT_ACCESS_PCT": f"% AOI within {cfg.transit_access_m:.0f} m of OSM transit point",
+                "HOSPITAL_ACCESS": "distance from requested coordinate to nearest OSM hospital/clinic",
+                "CRIT_INFRA_DENSITY": "count of selected critical facilities / AOI area",
+            }
+            for key in methods:
+                value = osm.get(key, np.nan)
+                for d in idx:
+                    rows.append(self._row(
+                        key, d, value,
+                        status="static_observed" if np.isfinite(value) else "missing",
+                        source="OpenStreetMap Overpass", dataset="OpenStreetMap", variable=key,
+                        method=methods[key], measurement_date=req, metadata=osm.get("_counts", {})
+                    ))
+                provenance.append({"component": key, "source": "OpenStreetMap Overpass", "metadata": osm.get("_counts", {})})
+        except Exception as exc:
+            errors.append(f"OSM metrics: {exc}")
+
+        # 11. Elevation/slope fallback.
+        try:
+            elevation = fetch_elevation_slope_fallback(lat, lon, cfg.analysis_area_km, 9, cfg.request_timeout_s)
+            value = elevation["value"]
+            for d in idx:
+                rows.append(self._row(
+                    "ELEVATION_SLOPE", d, value, status="static_fallback",
+                    source="Open-Meteo Elevation API", dataset="Open-Meteo elevation", variable="mean slope degrees",
+                    method="9x9 elevation grid and numerical terrain gradient", measurement_date=req,
+                    is_proxy=True, metadata=elevation
+                ))
+            provenance.append({"component": "ELEVATION_SLOPE", "source": "Open-Meteo Elevation fallback", "is_proxy": True, "metadata": elevation})
+        except Exception as exc:
+            errors.append(f"Elevation/slope: {exc}")
+
+        # 12. Optional Black Marble night lights. If not authenticated, it remains explicit missing data.
+        black_marble_ok = False
+        if cfg.use_earthdata_optional:
+            try:
+                import earthaccess
+                earthaccess.login(strategy="environment")
+                night = fetch_black_marble_monthly(lat, lon, idx[0] - pd.Timedelta(days=40), req, outdir / "earthdata_black_marble")
+                if not night.empty:
+                    add_sparse(
+                        "NIGHT_LIGHTS", night, 40,
+                        "NASA VIIRS Black Marble", "VNP46A3.002", "all-angle snow-free monthly radiance",
+                        "Earthdata HDF5 tile sample"
+                    )
+                    black_marble_ok = True
+            except Exception as exc:
+                errors.append(f"Black Marble optional adapter: {exc}")
+
+        if not black_marble_ok:
+            for d in idx:
+                rows.append(self._row(
+                    "NIGHT_LIGHTS", d, np.nan, status="missing",
+                    source="NASA VIIRS Black Marble", dataset="VNP46A3.002", variable="monthly radiance",
+                    method="Earthdata authentication required for numerical adapter",
+                    error="Set use_earthdata_optional=True and authenticate with earthaccess."
+                ))
+            provenance.append({
+                "component": "NIGHT_LIGHTS", "source": "NASA VIIRS Black Marble", "status": "not_downloaded",
+                "note": "Earthdata authentication required."
+            })
+
+        # ---------------------------------------------------------------------
+        # Resolve duplicates before derived readiness.
+        # ---------------------------------------------------------------------
+        long = pd.DataFrame(rows)
+        if long.empty:
+            long = pd.DataFrame(columns=["date", "component", "value"])
+        long["date"] = pd.to_datetime(long["date"])
+        rank = {
+            "observed": 0, "static_observed": 0, "carried_forward": 1, "derived": 2,
+            "static_fallback": 3, "proxy_reanalysis": 4, "derived_proxy": 5, "missing": 9,
+        }
+        long["_nonnull"] = long.value.isna().astype(int)
+        long["_rank"] = long.status.map(rank).fillna(6)
+        long = long.sort_values(["date", "component", "_nonnull", "_rank"]).drop_duplicates(["date", "component"], keep="first")
+        long = long.drop(columns=["_nonnull", "_rank"])
+
+        def long_series(key):
+            x = long[(long.component == key) & long.value.notna()].copy()
+            if x.empty:
+                return pd.Series(index=idx, dtype=float)
+            return x.sort_values("date").drop_duplicates("date", keep="last").set_index("date").value.astype(float).reindex(idx)
+
+        # 13. Disaster readiness deterministic proxy.
+        crit = long_series("CRIT_INFRA_DENSITY")
+        transit = long_series("TRANSPORT_ACCESS_PCT")
+        hospital = long_series("HOSPITAL_ACCESS")
+        flood = long_series("FLOOD_EXTENT")
+        extreme = long_series("EXTREME_RAINFALL")
+        readiness = pd.concat([
+            (crit / 5 * 100).clip(0, 100),
+            transit.clip(0, 100),
+            (100 - hospital / 10 * 100).clip(0, 100),
+            (100 - flood * 5).clip(0, 100),
+            (100 - extreme).clip(0, 100),
+        ], axis=1).mean(axis=1, skipna=True)
+        readiness_rows = []
+        for d, value in readiness.items():
+            readiness_rows.append(self._row(
+                "DISASTER_READINESS", d, value,
+                status="derived_proxy" if np.isfinite(value) else "missing",
+                source="Lupus Cortex deterministic composite", dataset="Derived readiness proxy", variable="readiness score",
+                method="mean(critical-infrastructure, transit, hospital, flood, extreme-rain sub-scores)",
+                measurement_date=d if np.isfinite(value) else None, is_proxy=True
+            ))
+        long = pd.concat([long, pd.DataFrame(readiness_rows)], ignore_index=True)
+        provenance.append({"component": "DISASTER_READINESS", "source": "Lupus Cortex deterministic composite", "is_proxy": True})
+
+        # 14. Guarantee complete daily x 30 grid. Missing means NaN, never fake data.
+        grid = pd.MultiIndex.from_product([idx, COMPONENT_KEYS], names=["date", "component"]).to_frame(index=False)
+        long = grid.merge(long, on=["date", "component"], how="left")
+        for key, (unit, _, _) in FRONTEND_META.items():
+            long.loc[(long.component == key) & long.unit.isna(), "unit"] = unit
+        long["status"] = long.status.fillna("missing")
+        long["requested_date"] = str(req.date())
+        long["lat"] = float(lat)
+        long["lon"] = float(lon)
+        long["location_id"] = location_id
+        long["location_name"] = name
+        long["retrieved_at"] = utcnow_iso()
+        long = long.sort_values(["date", "component"]).reset_index(drop=True)
+
+        # 15. Training matrix exactly 30 components.
+        wide = long.pivot(index="date", columns="component", values="value").reindex(columns=COMPONENT_KEYS)
+        wide.insert(0, "lon", float(lon))
+        wide.insert(0, "lat", float(lat))
+        wide.insert(0, "location_id", location_id)
+        wide = wide.reset_index()
+
+        # 16. Quality matrix.
+        lag_pivot = long.pivot(index="date", columns="component", values="lag_days").reindex(columns=COMPONENT_KEYS)
+        status_pivot = long.pivot(index="date", columns="component", values="status").reindex(columns=COMPONENT_KEYS)
+        quality = pd.DataFrame(index=idx)
+        wide_by_date = wide.set_index("date")
+        for key in COMPONENT_KEYS:
+            quality[f"{key}__lag_days"] = lag_pivot[key].values
+            quality[f"{key}__available"] = wide_by_date[key].notna().astype(int).values
+            quality[f"{key}__status"] = status_pivot[key].values
+        quality.insert(0, "lon", float(lon))
+        quality.insert(0, "lat", float(lat))
+        quality.insert(0, "location_id", location_id)
+        quality = quality.reset_index(names="date")
+
+        # 17. Latest values.
+        latest_rows = []
+        for key in COMPONENT_KEYS:
+            x = long[(long.component == key) & long.value.notna()].sort_values("date")
+            if x.empty:
+                latest_rows.append({"component": key, "value": np.nan, "date": None, "status": "missing", "unit": FRONTEND_META[key][0]})
+            else:
+                latest_rows.append(x.iloc[-1].to_dict())
+        latest = pd.DataFrame(latest_rows)
+
+        # 18. Coverage summary.
+        coverage = wide[COMPONENT_KEYS].notna().mean() * 100
+        coverage_df = pd.DataFrame({
+            "component": COMPONENT_KEYS,
+            "coverage_pct": [float(coverage[k]) for k in COMPONENT_KEYS],
+            "non_null_days": [int(wide[k].notna().sum()) for k in COMPONENT_KEYS],
+            "total_days": len(wide),
+        })
+
+        # 19. GIBS imagery metadata only.
+        try:
+            gibs = resolve_latest_gibs_date(lat, lon, req, 10)
+        except Exception as exc:
+            gibs = {"error": str(exc), "numerical_use": False}
+            errors.append(f"GIBS metadata: {exc}")
+
+        # 20. Write canonical outputs.
+        paths = {
+            "long": outdir / "components_daily_long.csv",
+            "wide": outdir / "components_daily_wide.csv",
+            "quality": outdir / "components_quality.csv",
+            "latest": outdir / "components_latest.csv",
+            "coverage": outdir / "component_coverage.csv",
+            "provenance": outdir / "provenance.csv",
+            "errors": outdir / "extraction_errors.csv",
+            "gibs": outdir / "gibs_visual_metadata.csv",
+            "registry": outdir / "component_registry.csv",
+        }
+        long.to_csv(paths["long"], index=False, encoding="utf-8-sig")
+        wide.to_csv(paths["wide"], index=False, encoding="utf-8-sig")
+        quality.to_csv(paths["quality"], index=False, encoding="utf-8-sig")
+        latest.to_csv(paths["latest"], index=False, encoding="utf-8-sig")
+        coverage_df.to_csv(paths["coverage"], index=False, encoding="utf-8-sig")
+        pd.DataFrame(provenance).to_csv(paths["provenance"], index=False, encoding="utf-8-sig")
+        pd.DataFrame({"error": errors}).to_csv(paths["errors"], index=False, encoding="utf-8-sig")
+        pd.DataFrame([gibs]).to_csv(paths["gibs"], index=False, encoding="utf-8-sig")
+
+        window_files = {}
+        for days in [15, 30, 45, 60, 75, 90]:
+            path = outdir / f"components_{days}d_wide.csv"
+            wide.tail(min(days, len(wide))).to_csv(path, index=False, encoding="utf-8-sig")
+            window_files[days] = str(path)
+
+        return {
+            "location_id": location_id,
+            "output_dir": str(outdir),
+            "requested_date": str(req.date()),
+            "lookback_days": lookback,
+            "long_rows": int(len(long)),
+            "wide_rows": int(len(wide)),
+            "overall_cell_coverage_pct": float(wide[COMPONENT_KEYS].notna().mean().mean() * 100),
+            "paths": {k: str(v) for k, v in paths.items()},
+            "window_files": window_files,
+            "errors": errors,
+            "gibs": gibs,
+        }
+
+    def extract_batch(self, coordinates_csv: str, requested_date=None, lookback_days=None) -> dict:
+        coords = pd.read_csv(coordinates_csv)
+        if not {"lat", "lon"}.issubset(coords.columns):
+            raise ValueError("Coordinates CSV must contain lat and lon columns; location_id/name are optional.")
+        manifests = []
+        wides = []
+        longs = []
+        for i, row in coords.iterrows():
+            name = str(row.get("name", row.get("location_id", f"location_{i + 1}")))
+            lid = str(row.get("location_id", "")).strip() or None
+            try:
+                manifest = self.extract(
+                    float(row.lat), float(row.lon), name=name,
+                    requested_date=requested_date, lookback_days=lookback_days,
+                    location_id_override=lid
+                )
+                manifests.append({
+                    "location_id": manifest["location_id"],
+                    "output_dir": manifest["output_dir"],
+                    "coverage_pct": manifest["overall_cell_coverage_pct"],
+                    "errors": " | ".join(manifest["errors"]),
+                })
+                wides.append(pd.read_csv(manifest["paths"]["wide"]))
+                longs.append(pd.read_csv(manifest["paths"]["long"]))
+            except Exception as exc:
+                manifests.append({
+                    "location_id": lid or name,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                })
+
+        batch_dir = Path(self.cfg.output_root) / "_batch"
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        if wides:
+            pd.concat(wides, ignore_index=True).to_csv(
+                batch_dir / "training_matrix_all_locations.csv", index=False, encoding="utf-8-sig"
+            )
+        if longs:
+            pd.concat(longs, ignore_index=True).to_csv(
+                batch_dir / "components_long_all_locations.csv", index=False, encoding="utf-8-sig"
+            )
+        pd.DataFrame(manifests).to_csv(batch_dir / "batch_manifest.csv", index=False, encoding="utf-8-sig")
+        return {
+            "batch_dir": str(batch_dir), "locations": int(len(coords)),
+            "successful": int(len(wides)), "failed": int(len(coords) - len(wides))
+        }
+
+
+# -----------------------------------------------------------------------------
+# 9. Command-line/Colab entry point
+# -----------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Lupus Cortex 30-component CSV extractor")
+    parser.add_argument("--lat", type=float, default=23.8103)
+    parser.add_argument("--lon", type=float, default=90.4125)
+    parser.add_argument("--name", type=str, default="Dhaka")
+    parser.add_argument("--date", type=str, default=None, help="YYYY-MM-DD; default=current date")
+    parser.add_argument("--days", type=int, default=90)
+    parser.add_argument("--area-km", type=float, default=5.0)
+    parser.add_argument("--workbook", type=str, default="/content/drive/MyDrive/LUPUS CORTEX/environmental_geospatial_indicators.xlsx")
+    parser.add_argument("--output", type=str, default="/content/drive/MyDrive/LUPUS CORTEX/data_extractor_output")
+    parser.add_argument("--batch-csv", type=str, default=None)
+    parser.add_argument("--earthdata", action="store_true", help="Enable optional authenticated Black Marble adapter")
+    parser.add_argument("--strict-no-proxy", action="store_true")
+    args = parser.parse_args()
+
+    config = ExtractorConfig(
+        workbook_path=args.workbook,
+        output_root=args.output,
+        lookback_days=args.days,
+        analysis_area_km=args.area_km,
+        use_earthdata_optional=args.earthdata,
+        strict_no_proxy=args.strict_no_proxy,
+    )
+    extractor = LupusCortexExtractor(config)
+    if args.batch_csv:
+        result = extractor.extract_batch(args.batch_csv, requested_date=args.date, lookback_days=args.days)
+    else:
+        result = extractor.extract(args.lat, args.lon, args.name, args.date, args.days)
+    print(json.dumps(result, indent=2, default=str))
