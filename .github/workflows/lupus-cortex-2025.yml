@@ -1,0 +1,68 @@
+name: Build Lupus Cortex 2025 Dynamic CSV
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "data_pipeline/**"
+      - ".github/workflows/lupus-cortex-2025.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-dataset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      EARTHDATA_TOKEN: ${{ secrets.EARTHDATA_TOKEN }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install scientific stack
+        run: |
+          python -m pip install --upgrade pip
+          pip install             "numpy<2.1" pandas requests requests-cache             xarray pydap netCDF4 h5netcdf             pystac-client planetary-computer rasterio scipy shapely pyproj             earthaccess h5py
+
+      - name: Extract 2025 component data
+        shell: bash
+        run: |
+          set -euo pipefail
+          EARTH_ARG=""
+          if [ -n "${EARTHDATA_TOKEN:-}" ]; then
+            EARTH_ARG="--earthdata"
+          fi
+          python data_pipeline/lupus_cortex_30_component_extractor.py             --date 2025-12-31             --days 365             --area-km 20             --workbook data_pipeline/component_registry.csv             --output output             --batch-csv data_pipeline/coords_2025.csv             ${EARTH_ARG}
+
+      - name: Build one dynamic master CSV
+        run: python data_pipeline/finalize_dataset.py
+
+      - name: Validate final CSV
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          p="output/LUPUS_CORTEX_2025_DYNAMIC_MASTER.csv"
+          d=pd.read_csv(p,low_memory=False)
+          assert len(d)>0
+          assert d["component_id"].nunique()==30, d["component_id"].nunique()
+          assert d["location_id"].nunique()==5, d["location_id"].nunique()
+          assert d["date"].min()=="2025-01-01"
+          assert d["date"].max()=="2025-12-31"
+          assert d["value"].notna().sum()>0
+          print({"rows":len(d),"components":d.component_id.nunique(),"locations":d.location_id.nunique(),
+                 "coverage_pct":round(100*d.value.notna().mean(),3)})
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LUPUS_CORTEX_2025_DYNAMIC_MASTER
+          path: output/LUPUS_CORTEX_2025_DYNAMIC_MASTER.csv
+          if-no-files-found: error
+          retention-days: 7
