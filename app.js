@@ -153,7 +153,6 @@ async function fetchSelected(){
  const overallStarted=performance.now(),queryKey=requestCacheKey(sel);
  E.fetchBtn.disabled=true;E.downloadsCard.classList.remove('hidden');E.conversionLog.innerHTML='';S.granules=[];S.rows=[];S.altRows=[];S.manifest=[];metrics();
  try{
-  assertEarthdataToken();
   status(E.fetchStatus,'Checking completed-request cache…','ok');
   const whole=await loadRequestCache(queryKey);
   if(whole){
@@ -166,6 +165,7 @@ async function fetchSelected(){
    setTimeout(()=>fetchAlternatives().catch(()=>{}),0);return;
   }
 
+  assertEarthdataToken();
   status(E.fetchStatus,'No completed cache. Resolving exact CMR granules…','ok');
   const resolved=await mapLimit(sel,Math.min(6,sel.length),async cc=>{
    const gs=await granules(cc,S.search,false,false),cy=cycle(gs,cc);
