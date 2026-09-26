@@ -150,7 +150,6 @@ grep -q "conversionConcurrency(ready)" app.js
 
 grep -q "granuleInExactRange" app.js
 
-grep -q "Fast exact mode" app.js
 
 grep -q "directPipelineConcurrency" app.js
 
@@ -238,5 +237,31 @@ grep -q "Array.from({length:pages-1}" app.js
 ! grep -q "tryHarmonyFastCollection(cc,gs)" app.js
 
 grep -q "setTimeout(()=>fetchAlternatives" app.js
+
+grep -q "const CONVERTED_CACHE_BASE=" app.js
+
+grep -q "const CACHE_SCHEMA=" app.js
+
+grep -q "function cacheDb" app.js
+
+grep -q "indexedDB.open" app.js
+
+grep -q "function granuleCacheKey" app.js
+
+grep -q "function requestCacheKey" app.js
+
+grep -q "hydrateGranuleCache" app.js
+
+grep -q "loadRequestCache" app.js
+
+grep -q "saveGranuleCache" app.js
+
+grep -q "saveRequestCache" app.js
+
+grep -q "All .* granules loaded from converted cache" app.js
+
+test -f supabase/functions/converted-cache/index.ts
+
+grep -q "converted_cache_index" supabase/functions/converted-cache/index.ts
 
 echo "Static product validation passed."
