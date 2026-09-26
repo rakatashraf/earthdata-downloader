@@ -167,7 +167,6 @@ grep -q "StructMetadata" granule-worker.js
 grep -q "function eosXY" granule-worker.js
 
 grep -q "Exact granule list frozen" app.js
-grep -q "Exact NASA set complete" app.js
 
 ! grep -q "No exact-period granules found. Looking for the nearest prior data" app.js
 
@@ -204,5 +203,25 @@ grep -q "return \"netcdf\"" supabase/functions/stage-granule/index.ts
 grep -q "return \"gzip\"" supabase/functions/stage-granule/index.ts
 
 grep -q "return \"zip\"" supabase/functions/stage-granule/index.ts
+
+grep -q "const HARMONY=" app.js
+
+grep -q "FAST_COLLECTION_TARGET_MS=60000" app.js
+
+grep -q "HARMONY_FAST_BUDGET_MS=24000" app.js
+
+grep -q "harmonyCapabilities" app.js
+
+grep -q "tryHarmonyFastCollection" app.js
+
+grep -q "concatenate" app.js
+
+grep -q "maxResults" app.js
+
+grep -q "FAST COLLECTION MODE" app.js
+
+grep -q "Collection finished in" app.js
+
+grep -q "All selected NASA collections finished through fast server-side reduction" app.js
 
 echo "Static product validation passed."
