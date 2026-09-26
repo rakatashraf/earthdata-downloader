@@ -283,7 +283,7 @@ grep -q "modis.ornl.gov" supabase/functions/alternative-proxy/index.ts
 grep -q "function h5L3Binned" granule-worker.js
 grep -q "NASA Level-3 integerized-sinusoidal bins" granule-worker.js
 grep -q "No completed cache. Resolving exact CMR granules" app.js
-grep -q "bounded native granule(s) remain after official server-side routing" app.js
+grep -q "bounded direct granule job(s) after server-side routing" app.js
 grep -q "Ready in " app.js
 ! grep -q "No public COG mirror collection found" app.js
 echo "Static product validation passed."
