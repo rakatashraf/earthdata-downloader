@@ -144,7 +144,10 @@ def load_indicator_registry(workbook_path: str) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Indicator workbook not found: {path}")
     if path.suffix.lower() == ".csv":
-        df = pd.read_csv(path, encoding="utf-8-sig")
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            first = fh.readline()
+        skip = 2 if first.startswith("<PARSED TEXT FOR SHEET:") else 0
+        df = pd.read_csv(path, encoding="utf-8-sig", skiprows=skip)
     else:
         xls = pd.ExcelFile(path)
         sheet = "Indicators" if "Indicators" in xls.sheet_names else xls.sheet_names[0]
