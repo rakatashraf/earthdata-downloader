@@ -149,3 +149,22 @@ HDF5/NetCDF4 conversion now supports three geolocation strategies:
 - regular-grid geospatial bound attributes such as geospatial min/max latitude/longitude.
 
 A valid HDF-EOS grid therefore does not need a literal `Latitude` or `Longitude` dataset to be converted.
+
+
+## Fast Collection Mode
+
+The active extractor targets a 60-second wall-clock completion time for a selected collection when NASA service capabilities and network conditions make that feasible.
+
+After the exact CMR granule list is frozen:
+
+1. Small collections skip service-orchestration overhead and use aggressive parallel direct download/conversion.
+2. Larger collections query the NASA Harmony capabilities endpoint.
+3. When the collection supports bounding-box reduction, Harmony is asked to process only the selected SW/NE area, exact time window and matching component variable when available.
+4. Concatenation is requested when the collection supports it, reducing many input granules to one or a few outputs.
+5. CSV output is preferred when Harmony advertises it; otherwise reduced NetCDF/GeoTIFF/HDF outputs are downloaded and converted locally.
+6. Harmony fast processing has a strict time budget. If it does not complete quickly enough, the browser falls back to the exact-granule direct path instead of waiting indefinitely.
+7. Direct fallback parallelism scales with file size, CPU and available browser memory.
+
+For smaller exact sets, CMR granule concept IDs are included directly in the Harmony request. Very large sets use the frozen exact temporal/spatial constraints plus the frozen granule count as the processing limit.
+
+A literal universal one-minute guarantee is not technically possible for arbitrary collections because NASA processing time, remote object size and internet throughput are external constraints. Fast Collection Mode minimizes transferred bytes and service overhead so the application has the best practical chance of meeting the one-minute target.
