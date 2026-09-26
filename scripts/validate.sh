@@ -268,9 +268,13 @@ grep -q "Instant cache hit" app.js
 
 grep -q "EDD_DOWNLOAD_CONCURRENCY=5" app.js
 grep -q "MAX_DIRECT_GRANULES_PER_COLLECTION" app.js
+
+grep -q "MAX_TOTAL_DIRECT_GRANULES" app.js
+
+grep -q "totalDirectTooLarge" app.js
 grep -q "STRUCTURAL_RE" app.js
 grep -q "collection-preflight-block" app.js
-grep -q "granule-worker.js?v=20260926-1535" app.js
+grep -q "granule-worker.js?v=20260926-1618" app.js
 grep -q "loadTesvisProducts" app.js
 grep -q "fetchTesvisCollection" app.js
 grep -q "Raw HDF4 only" app.js
