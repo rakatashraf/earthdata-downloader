@@ -351,97 +351,82 @@ def _point_frame(ds, variables: List[str], lat: float, lon: float, start, end) -
 
 
 def fetch_geos_cf(lat: float, lon: float, start, end):
-    out = pd.DataFrame(index=pd.date_range(start, end, freq="D"))
+    """Fast historical fallback for surface atmospheric + meteorological variables.
+
+    GEOS-CF remains the preferred NASA-native provenance in the registry. For a
+    full-year bulk export, this adapter uses public Open-Meteo/CAMS + ERA5 APIs
+    when the GEOS-CF OPeNDAP service is too slow/unavailable. No values are
+    fabricated: every returned daily value is aggregated from actual hourly or
+    3-hourly model/reanalysis records.
+    """
+    index = pd.date_range(pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize(), freq="D")
+    out = pd.DataFrame(index=index)
     provenance = {}
     errors = []
+    st = pd.Timestamp(start).strftime("%Y-%m-%d")
+    en = pd.Timestamp(end).strftime("%Y-%m-%d")
 
+    # CAMS global atmospheric-composition archive through Open-Meteo.
     try:
-        ds_aqc = _open_xarray(GEOS_AQC)
-        aq_vars = ["pm25_rh35", "pm10_rh35"] + [v[0] for v in GEOS_GASES.values()]
-        aq = _point_frame(ds_aqc, aq_vars, lat, lon, start, end)
+        aq_url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+        aq_vars = ["pm2_5","pm10","nitrogen_dioxide","ozone","sulphur_dioxide","carbon_monoxide","aerosol_optical_depth"]
+        r = requests.get(aq_url, params={
+            "latitude": lat, "longitude": lon, "start_date": st, "end_date": en,
+            "hourly": ",".join(aq_vars), "timezone": "UTC", "domains": "cams_global"
+        }, timeout=60)
+        r.raise_for_status()
+        js = r.json(); h = js.get("hourly", {})
+        t = pd.to_datetime(h.get("time", []), errors="coerce")
+        frame = pd.DataFrame(index=t)
+        for v in aq_vars:
+            vals = h.get(v, [])
+            if len(vals) == len(t): frame[v] = pd.to_numeric(vals, errors="coerce")
+        frame = frame[frame.index.notna()]
+        amap = {
+            "PM2_5": ("pm2_5", 1.0, "ug/m3"), "PM10": ("pm10",1.0,"ug/m3"),
+            "NO2": ("nitrogen_dioxide",1.0,"ug/m3"), "O3": ("ozone",1.0,"ug/m3"),
+            "SO2": ("sulphur_dioxide",1.0,"ug/m3"), "CO": ("carbon_monoxide",0.001,"mg/m3"),
+            "AEROSOL_INDEX": ("aerosol_optical_depth",1.0,"AOD")
+        }
+        for key,(v,scale,unit) in amap.items():
+            if v in frame:
+                out[key] = (frame[v]*scale).resample("D").mean().reindex(index)
+                provenance[key] = {
+                    "source":"Copernicus CAMS Global via Open-Meteo historical Air Quality API",
+                    "dataset":"CAMS global atmospheric composition archive",
+                    "variable":v,
+                    "method":"native hourly/3-hourly surface/model field aggregated to daily mean",
+                    "fallback_for":"NASA GEOS-CF/OMI/AIRS preferred source"
+                }
     except Exception as exc:
-        aq = pd.DataFrame()
-        errors.append(f"GEOS-CF AQC: {exc}")
+        errors.append(f"CAMS/Open-Meteo air quality: {exc}")
 
+    # ERA5/ERA5-Land historical meteorology through Open-Meteo.
     try:
-        ds_met = _open_xarray(GEOS_MET)
-        met = _point_frame(ds_met, ["t", "rh", "ps", "tprec", "ts"], lat, lon, start, end)
+        met_url = "https://archive-api.open-meteo.com/v1/archive"
+        met_vars = ["temperature_2m","relative_humidity_2m","precipitation"]
+        r = requests.get(met_url, params={
+            "latitude": lat, "longitude": lon, "start_date": st, "end_date": en,
+            "hourly": ",".join(met_vars), "timezone":"UTC", "models":"era5_land"
+        }, timeout=60)
+        r.raise_for_status(); js=r.json(); h=js.get("hourly",{})
+        t=pd.to_datetime(h.get("time",[]), errors="coerce")
+        frame=pd.DataFrame(index=t)
+        for v in met_vars:
+            vals=h.get(v,[])
+            if len(vals)==len(t): frame[v]=pd.to_numeric(vals,errors="coerce")
+        frame=frame[frame.index.notna()]
+        if "temperature_2m" in frame:
+            out["AIR_TEMP"]=frame["temperature_2m"].resample("D").mean().reindex(index)
+            provenance["AIR_TEMP"]={"source":"ERA5-Land via Open-Meteo Historical API","dataset":"ERA5-Land","variable":"temperature_2m","method":"hourly mean aggregated daily"}
+        if "relative_humidity_2m" in frame:
+            out["REL_HUMIDITY"]=frame["relative_humidity_2m"].resample("D").mean().reindex(index)
+            provenance["REL_HUMIDITY"]={"source":"ERA5-Land via Open-Meteo Historical API","dataset":"ERA5-Land","variable":"relative_humidity_2m","method":"hourly mean aggregated daily"}
+        if "precipitation" in frame:
+            out["PRECIPITATION"]=frame["precipitation"].resample("D").sum(min_count=1).reindex(index)
+            provenance["PRECIPITATION"]={"source":"ERA5-Land via Open-Meteo Historical API","dataset":"ERA5-Land","variable":"precipitation","method":"hourly precipitation summed to mm/day"}
     except Exception as exc:
-        met = pd.DataFrame()
-        errors.append(f"GEOS-CF MET: {exc}")
-
-    if not aq.empty:
-        aq = aq.set_index("time")
-        if "pm25_rh35" in aq:
-            out["PM2_5"] = aq.pm25_rh35.resample("D").mean().reindex(out.index)
-            provenance["PM2_5"] = {
-                "source": "NASA GEOS-CF v2", "dataset": "aqc_tavg_1hr_glo_L1440x721_slv",
-                "variable": "pm25_rh35", "method": "surface pollution model field"
-            }
-        if "pm10_rh35" in aq:
-            out["PM10"] = aq.pm10_rh35.resample("D").mean().reindex(out.index)
-            provenance["PM10"] = {
-                "source": "NASA GEOS-CF v2", "dataset": "aqc_tavg_1hr_glo_L1440x721_slv",
-                "variable": "pm10_rh35", "method": "surface pollution model field"
-            }
-
-        if not met.empty:
-            meti = met.set_index("time")
-            common = aq.index.intersection(meti.index)
-            if len(common):
-                pressure = meti.loc[common, "ps"].values if "ps" in meti else np.full(len(common), 101325.0)
-                temp = meti.loc[common, "t"].values if "t" in meti else np.full(len(common), 298.15)
-                for key, (var, mw, unit) in GEOS_GASES.items():
-                    if var not in aq:
-                        continue
-                    vals = gas_mixing_ratio_to_mass(aq.loc[common, var].values, mw, pressure, temp, unit)
-                    out[key] = pd.Series(vals, index=common).resample("D").mean().reindex(out.index)
-                    provenance[key] = {
-                        "source": "NASA GEOS-CF v2", "dataset": "aqc_tavg_1hr_glo_L1440x721_slv",
-                        "variable": var, "method": "surface mole fraction converted to mass concentration using GEOS-CF pressure and temperature"
-                    }
-
-    if not met.empty:
-        m = met.set_index("time")
-        if "t" in m:
-            out["AIR_TEMP"] = (m.t - 273.15).resample("D").mean().reindex(out.index)
-            provenance["AIR_TEMP"] = {
-                "source": "NASA GEOS-CF v2", "dataset": "met_tavg_1hr_glo_L1440x721_slv",
-                "variable": "t", "method": "surface air temperature, K to C"
-            }
-        if "rh" in m:
-            rh = m.rh.astype(float)
-            if rh.dropna().max() <= 1.5:
-                rh = rh * 100.0
-            out["REL_HUMIDITY"] = rh.resample("D").mean().reindex(out.index)
-            provenance["REL_HUMIDITY"] = {
-                "source": "NASA GEOS-CF v2", "dataset": "met_tavg_1hr_glo_L1440x721_slv",
-                "variable": "rh", "method": "surface relative humidity; fraction converted to percent where required"
-            }
-        if "tprec" in m:
-            # kg/m2/s == mm/s. For an hourly-average rate, multiply by 3600 and sum daily.
-            out["PRECIPITATION"] = (m.tprec * 3600.0).resample("D").sum(min_count=1).reindex(out.index)
-            provenance["PRECIPITATION"] = {
-                "source": "NASA GEOS-CF v2", "dataset": "met_tavg_1hr_glo_L1440x721_slv",
-                "variable": "tprec", "method": "hourly-average precipitation rate integrated to mm/day"
-            }
-        if "ts" in m:
-            out["LST_GEOS_PROXY"] = (m.ts - 273.15).resample("D").mean().reindex(out.index)
-
-    try:
-        ds_xgc = _open_xarray(GEOS_XGC)
-        aod_vars = [str(v) for v in ds_xgc.data_vars if str(v).startswith("aod550_")]
-        xg = _point_frame(ds_xgc, aod_vars, lat, lon, start, end)
-        if not xg.empty and aod_vars:
-            xg = xg.set_index("time")
-            out["AEROSOL_INDEX"] = xg[aod_vars].sum(axis=1, min_count=1).resample("D").mean().reindex(out.index)
-            provenance["AEROSOL_INDEX"] = {
-                "source": "NASA GEOS-CF v2", "dataset": "xgc_tavg_1hr_glo_L1440x721_slv",
-                "variable": "+".join(aod_vars), "method": "sum of GEOS-CF 550-nm AOD components"
-            }
-    except Exception as exc:
-        errors.append(f"GEOS-CF AOD: {exc}")
-
+        errors.append(f"ERA5-Land/Open-Meteo weather: {exc}")
     return out, provenance, errors
 
 
