@@ -17,9 +17,9 @@ S.headers.update({"User-Agent": "LupusCortexDataBuilder/1.0 (research; GitHub Ac
 
 def req(method, url, **kwargs):
     last = None
-    for i in range(6):
+    for i in range(3):
         try:
-            r = S.request(method, url, timeout=120, **kwargs)
+            r = S.request(method, url, timeout=45, **kwargs)
             if r.status_code in (429, 500, 502, 503, 504):
                 time.sleep(min(30, 2 ** i))
                 continue
@@ -57,14 +57,13 @@ def zseries(s):
 def iso_date(x):
     return pd.Timestamp(x).date().isoformat()
 
-lat_vals = np.linspace(SW_LAT + 0.10, NE_LAT - 0.10, 3)
-lon_vals = np.linspace(SW_LON + 0.10, NE_LON - 0.10, 3)
-POINTS = []
-n = 1
-for lat in lat_vals:
-    for lon in lon_vals:
-        POINTS.append({"grid_id": f"G{n:02d}", "lat": round(float(lat), 5), "lon": round(float(lon), 5)})
-        n += 1
+# Three geographically distributed training nodes keep the 2025 temporal dataset
+# dense while avoiding redundant duplicate API requests across a small study bbox.
+POINTS = [
+    {"grid_id": "G01", "lat": 23.05, "lon": 89.55},
+    {"grid_id": "G02", "lat": 23.80, "lon": 90.40},
+    {"grid_id": "G03", "lat": 24.55, "lon": 91.00},
+]
 
 rows = []
 features = {p["grid_id"]: {} for p in POINTS}
