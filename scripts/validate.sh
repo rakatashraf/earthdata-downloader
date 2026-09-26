@@ -266,5 +266,17 @@ grep -q "Checking completed-request cache" app.js
 
 grep -q "Instant cache hit" app.js
 
-
-grep -q "EDD_DOWNLOAD_CONCURRENCY=5" app.js\n\ngrep -q "granule-worker.js?v=20260926-1410" app.js\n\ngrep -q "loadTesvisProducts" app.js\n\ngrep -q "fetchTesvisCollection" app.js\n\ngrep -q "Raw HDF4 only" app.js\n\ngrep -q "official-ornl-subset" app.js\n\ngrep -q "modis.ornl.gov" supabase/functions/alternative-proxy/index.ts\n\ngrep -q "function h5L3Binned" granule-worker.js\n\ngrep -q "NASA Level-3 integerized-sinusoidal bins" granule-worker.js\n\ngrep -q "No completed cache. Resolving exact CMR granules" app.js\n\ngrep -q "native granule(s) remain after official subset routing" app.js\n\ngrep -q "Ready in " app.js\n\necho "Static product validation passed."
+grep -q "EDD_DOWNLOAD_CONCURRENCY=5" app.js
+grep -q "granule-worker.js?v=20260926-1410" app.js
+grep -q "loadTesvisProducts" app.js
+grep -q "fetchTesvisCollection" app.js
+grep -q "Raw HDF4 only" app.js
+grep -q "official-ornl-subset" app.js
+grep -q "modis.ornl.gov" supabase/functions/alternative-proxy/index.ts
+grep -q "function h5L3Binned" granule-worker.js
+grep -q "NASA Level-3 integerized-sinusoidal bins" granule-worker.js
+grep -q "No completed cache. Resolving exact CMR granules" app.js
+grep -q "native granule(s) remain after official subset routing" app.js
+grep -q "Ready in " app.js
+! grep -q "No public COG mirror collection found" app.js
+echo "Static product validation passed."
