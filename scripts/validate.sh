@@ -158,7 +158,6 @@ grep -q "convertDirectGranule" app.js
 grep -q "recoverTransientViaStaging" app.js
 
 
-grep -q "granule-worker.js?v=20260926-0155" app.js
 grep -q "function h5EosSpec" granule-worker.js
 
 grep -q "StructMetadata" granule-worker.js
@@ -263,12 +262,9 @@ grep -q "converted_cache_index" supabase/functions/converted-cache/index.ts
 
 grep -q "Checking completed-request cache" app.js
 
-grep -q "No whole-request cache. Resolving exact CMR granules in parallel" app.js
 
-grep -q "Checking per-granule converted cache" app.js
 
 grep -q "Instant cache hit" app.js
 
-grep -q "NASA/cache ready in" app.js
 
-echo "Static product validation passed."
+grep -q "EDD_DOWNLOAD_CONCURRENCY=5" app.js\n\ngrep -q "granule-worker.js?v=20260926-1410" app.js\n\ngrep -q "loadTesvisProducts" app.js\n\ngrep -q "fetchTesvisCollection" app.js\n\ngrep -q "Raw HDF4 only" app.js\n\ngrep -q "official-ornl-subset" app.js\n\ngrep -q "modis.ornl.gov" supabase/functions/alternative-proxy/index.ts\n\ngrep -q "function h5L3Binned" granule-worker.js\n\ngrep -q "NASA Level-3 integerized-sinusoidal bins" granule-worker.js\n\ngrep -q "No completed cache. Resolving exact CMR granules" app.js\n\ngrep -q "native granule(s) remain after official subset routing" app.js\n\ngrep -q "Ready in " app.js\n\necho "Static product validation passed."
