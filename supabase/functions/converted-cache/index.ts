@@ -10,7 +10,7 @@ function cors(origin:string|null){
   return {
     ...(allow?{"Access-Control-Allow-Origin":allow}:{}),
     "Access-Control-Allow-Methods":"GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers":"Content-Type,X-Cache-Key",
+    "Access-Control-Allow-Headers":"Content-Type,X-Cache-Key,X-Cache-Rows,X-Cache-Component,X-Cache-Collection,X-Cache-Granule",
     "Access-Control-Max-Age":"86400",
     "Cache-Control":"no-store",
     "Vary":"Origin"
@@ -40,14 +40,22 @@ Deno.serve(async req=>{
   if(req.method==="POST"&&url.searchParams.get("action")==="lookup"){
     let body:any;try{body=await req.json()}catch{return json(400,{error:"Invalid JSON"},h)}
     const keys=Array.isArray(body.keys)?body.keys.filter((x:any)=>typeof x==="string"&&validKey(x)).slice(0,500):[];
+    if(!keys.length)return json(200,{ok:true,items:[]},h);
+    const {data:indexRows,error:indexError}=await supabase
+      .from("converted_cache_index")
+      .select("cache_key,byte_size,row_count")
+      .in("cache_key",keys);
+    if(indexError)return json(500,{error:indexError.message},h);
     const hits:any[]=[];
-    for(let i=0;i<keys.length;i+=50){
-      const batch=keys.slice(i,i+50);
-      const group=await Promise.all(batch.map(async k=>{
-        const {data,error}=await supabase.storage.from(BUCKET).createSignedUrl(k,900);
-        return error?null:{key:k,url:data.signedUrl};
-      }));
-      hits.push(...group.filter(Boolean));
+    for(const row of indexRows||[]){
+      const {data,error}=await supabase.storage.from(BUCKET).createSignedUrl(row.cache_key,900);
+      if(!error&&data?.signedUrl)hits.push({key:row.cache_key,url:data.signedUrl,bytes:row.byte_size,rows:row.row_count});
+    }
+    if(hits.length){
+      supabase.from("converted_cache_index")
+        .update({last_accessed_at:new Date().toISOString()})
+        .in("cache_key",hits.map(x=>x.key))
+        .then(()=>{}).catch(()=>{});
     }
     return json(200,{ok:true,items:hits},h);
   }
@@ -61,7 +69,21 @@ Deno.serve(async req=>{
     if(!bytes.byteLength||bytes.byteLength>MAX_WRITE)return json(413,{error:"Cache object exceeds shared-cache limit"},h);
     const {error}=await supabase.storage.from(BUCKET).upload(objectKey,bytes,{contentType:"application/gzip",cacheControl:"31536000",upsert:true});
     if(error)return json(500,{error:error.message},h);
-    return json(200,{ok:true,key:objectKey,bytes:bytes.byteLength},h);
+    const rowCount=Math.max(0,Number(req.headers.get("x-cache-rows")||0)||0);
+    const component=String(req.headers.get("x-cache-component")||"").slice(0,160);
+    const collectionId=String(req.headers.get("x-cache-collection")||"").slice(0,200);
+    const granuleId=String(req.headers.get("x-cache-granule")||"").slice(0,300);
+    const {error:indexError}=await supabase.from("converted_cache_index").upsert({
+      cache_key:objectKey,
+      byte_size:bytes.byteLength,
+      row_count:rowCount,
+      component,
+      collection_id:collectionId,
+      granule_id:granuleId,
+      last_accessed_at:new Date().toISOString()
+    });
+    if(indexError)return json(500,{error:indexError.message},h);
+    return json(200,{ok:true,key:objectKey,bytes:bytes.byteLength,rows:rowCount},h);
   }
 
   return json(405,{error:"Unsupported cache operation"},h);
