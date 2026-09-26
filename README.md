@@ -187,3 +187,21 @@ Active sequence:
 9. Alternative-source fetching is deferred until the NASA extraction has completed so it cannot steal bandwidth or CPU from the main satellite job.
 
 Harmony helper code may remain available for future optional modes, but it is not called by the normal extraction path.
+
+
+## Cache-first historical extraction
+
+Repeated historical extraction is now cache-first.
+
+Before contacting NASA, the application checks:
+
+1. a whole-request cache keyed by selected collections, component, exact date range, geometry and parser schema;
+2. a per-granule cache keyed by NASA granule identity, collection, component, geometry and parser schema.
+
+The local browser cache uses IndexedDB. A shared private Supabase Storage cache is also used for compact converted granule outputs, with an indexed Postgres lookup table so thousands of granule keys can be checked in batches.
+
+Successful granules are cached immediately as they are converted. If a large extraction is interrupted, the next run reuses completed granules and downloads only cache misses.
+
+A fully completed request is cached as a whole-request result. Repeating the identical request on the same browser can therefore skip CMR, NASA download and scientific conversion entirely.
+
+Shared converted-cache objects are gzip-compressed and intentionally size-limited so the Free-plan Supabase Storage quota is not exhausted by giant artifacts.
