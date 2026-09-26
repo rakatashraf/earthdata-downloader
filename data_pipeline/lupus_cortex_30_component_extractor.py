@@ -475,63 +475,105 @@ def _sample_cog(item, asset_key: str, lon: float, lat: float) -> float:
         return float(val)
 
 
-def fetch_modis_lst(lat, lon, start, end) -> pd.Series:
-    # Daily MODIS COG point-by-point reads are expensive in CI; the finalizer
-    # fills this field with an explicitly flagged reanalysis proxy if unavailable.
-    return pd.Series(dtype=float)
-    c = _pc_client()
-    search = c.search(
-        collections=["modis-11A1-061"],
-        intersects={"type": "Point", "coordinates": [lon, lat]},
-        datetime=f"{pd.Timestamp(start).date()}/{pd.Timestamp(end).date()}"
-    )
-    rows = []
-    for item in search.items():
-        try:
-            d = pd.Timestamp(item.datetime).normalize().tz_localize(None)
-            raw = _sample_cog(item, "LST_Day_1km", lon, lat)
-            qc = _sample_cog(item, "QC_Day", lon, lat)
-            if not np.isfinite(raw):
-                continue
-            if np.isfinite(qc) and (int(qc) & 0b11) > 1:
-                continue
-            value = raw * 0.02 - 273.15
-            if -100 <= value <= 100:
-                rows.append((d, value))
-        except Exception:
+def _ornl_modis_series(product, band, lat, lon, start, end, valid_min=None, valid_max=None):
+    """Fetch a real MODIS point time series from ORNL DAAC TESViS public REST API."""
+    import requests
+    base = f"https://modis.ornl.gov/rst/api/v1/{product}"
+    r = requests.get(base + "/dates", params={"latitude": lat, "longitude": lon}, timeout=30)
+    r.raise_for_status()
+    j = r.json()
+    dates = j.get("dates", j if isinstance(j, list) else [])
+    available = []
+    for x in dates:
+        if isinstance(x, dict):
+            md = x.get("modis_date") or x.get("modisDate")
+            cd = x.get("calendar_date") or x.get("calendarDate")
+        else:
+            md, cd = str(x), None
+        if not md:
             continue
+        try:
+            d = pd.Timestamp(cd).normalize() if cd else pd.Timestamp.strptime(md[1:], "%Y%j").normalize()
+        except Exception:
+            try:
+                d = pd.to_datetime(md[1:], format="%Y%j").normalize()
+            except Exception:
+                continue
+        if pd.Timestamp(start).normalize() <= d <= pd.Timestamp(end).normalize():
+            available.append((md, d))
+    available.sort(key=lambda x: x[1])
+    rows = []
+    for i in range(0, len(available), 10):
+        chunk = available[i:i+10]
+        if not chunk:
+            continue
+        q = {
+            "latitude": lat, "longitude": lon, "band": band,
+            "startDate": chunk[0][0], "endDate": chunk[-1][0],
+            "kmAboveBelow": 0, "kmLeftRight": 0,
+        }
+        rr = requests.get(base + "/subset", params=q, headers={"Accept": "application/json"}, timeout=45)
+        rr.raise_for_status()
+        data = rr.json()
+        scale = data.get("scale", 1.0)
+        try:
+            scale = float(scale)
+        except Exception:
+            scale = 1.0
+        for rec in data.get("subset", []):
+            md = rec.get("modis_date") or rec.get("modisDate")
+            cd = rec.get("calendar_date") or rec.get("calendarDate")
+            vals = rec.get("data", [])
+            if not isinstance(vals, list):
+                vals = [vals]
+            numeric = []
+            for v in vals:
+                try:
+                    z = float(v)
+                    if z > -9999:
+                        numeric.append(z)
+                except Exception:
+                    pass
+            if not numeric:
+                continue
+            value = float(np.nanmean(numeric)) * scale
+            if valid_min is not None and value < valid_min:
+                continue
+            if valid_max is not None and value > valid_max:
+                continue
+            try:
+                d = pd.Timestamp(cd).normalize() if cd else pd.to_datetime(md[1:], format="%Y%j").normalize()
+            except Exception:
+                continue
+            rows.append((d, value))
     if not rows:
         return pd.Series(dtype=float)
-    df = pd.DataFrame(rows, columns=["date", "value"])
-    return df.groupby("date").value.mean().sort_index()
+    frame = pd.DataFrame(rows, columns=["date", "value"])
+    return frame.groupby("date").value.mean().sort_index()
+
+
+def fetch_modis_lst(lat, lon, start, end) -> pd.Series:
+    # Public ORNL DAAC 8-day MODIS LST is used for reliable no-login acquisition.
+    s = _ornl_modis_series("MOD11A2", "LST_Day_1km", lat, lon, start, end)
+    # ORNL scale metadata may be 0.02 or 1 depending on endpoint revision.
+    if s.empty:
+        return s
+    if float(s.median()) > 1000:
+        s = s * 0.02
+    # MODIS LST is Kelvin after scaling.
+    if float(s.median()) > 150:
+        s = s - 273.15
+    return s[(s >= -100) & (s <= 100)]
 
 
 def fetch_modis_ndvi(lat, lon, start, end) -> pd.Series:
-    c = _pc_client()
-    search = c.search(
-        collections=["modis-13A1-061"],
-        intersects={"type": "Point", "coordinates": [lon, lat]},
-        datetime=f"{pd.Timestamp(start).date()}/{pd.Timestamp(end).date()}"
-    )
-    rows = []
-    for item in search.items():
-        try:
-            d = pd.Timestamp(item.datetime).normalize().tz_localize(None)
-            raw = _sample_cog(item, "500m_16_days_NDVI", lon, lat)
-            reliability = _sample_cog(item, "500m_16_days_pixel_reliability", lon, lat)
-            if not np.isfinite(raw):
-                continue
-            if np.isfinite(reliability) and int(reliability) not in (0, 1):
-                continue
-            value = raw * 0.0001
-            if -1 <= value <= 1:
-                rows.append((d, value))
-        except Exception:
-            continue
-    if not rows:
-        return pd.Series(dtype=float)
-    df = pd.DataFrame(rows, columns=["date", "value"])
-    return df.groupby("date").value.mean().sort_index()
+    # Public ORNL DAAC MOD13Q1 16-day vegetation index.
+    s = _ornl_modis_series("MOD13Q1", "250m_16_days_NDVI", lat, lon, start, end)
+    if s.empty:
+        return s
+    if float(s.abs().median()) > 2:
+        s = s * 0.0001
+    return s[(s >= -1) & (s <= 1)]
 
 
 def _read_aoi_band(item, band_key: str, bbox4326):
@@ -1213,8 +1255,8 @@ class LupusCortexExtractor:
             series = fetch_modis_lst(lat, lon, idx[0] - pd.Timedelta(days=cfg.max_lag_lst_days), req)
             add_sparse(
                 "LST", series, cfg.max_lag_lst_days,
-                "NASA MODIS via Microsoft Planetary Computer", "MOD11A1.061", "LST_Day_1km",
-                "QC-filtered LST, scale 0.02 K, converted to Celsius"
+                "NASA MODIS via ORNL DAAC TESViS", "MOD11A2", "LST_Day_1km",
+                "public REST subset; native 8-day composite; converted to Celsius"
             )
         except Exception as exc:
             errors.append(f"MODIS LST: {exc}")
@@ -1224,8 +1266,8 @@ class LupusCortexExtractor:
             series = fetch_modis_ndvi(lat, lon, idx[0] - pd.Timedelta(days=cfg.max_lag_ndvi_days), req)
             add_sparse(
                 "NDVI", series, cfg.max_lag_ndvi_days,
-                "NASA MODIS via Microsoft Planetary Computer", "MOD13A1.061", "500m_16_days_NDVI",
-                "pixel-reliability filtered, scale 0.0001"
+                "NASA MODIS via ORNL DAAC TESViS", "MOD13Q1", "250m_16_days_NDVI",
+                "public REST subset; native 16-day composite; scale normalized"
             )
         except Exception as exc:
             errors.append(f"MODIS NDVI: {exc}")
